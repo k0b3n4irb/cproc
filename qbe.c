@@ -97,6 +97,8 @@ struct func {
 	unsigned lastid;
 };
 
+/* Use 'l' (long) class for pointers - standard QBE convention.
+ * The w65816 backend treats 'l' as 16-bit since that's the pointer size. */
 static const int ptrclass = 'l';
 
 void
@@ -183,7 +185,8 @@ qbetype(struct type *t)
 		sb = {'w', 'b', ILOADSB, ISTOREB},
 		uh = {'w', 'h', ILOADUH, ISTOREH},
 		sh = {'w', 'h', ILOADSH, ISTOREH},
-		w = {'w', 'w', ILOADW, ISTOREW},
+		/* w65816: 2-byte int uses 'w' class for ops, 'h' for data (halfword = 2 bytes) */
+		wh = {'w', 'h', ILOADW, ISTOREW},
 		l = {'l', 'l', ILOADL, ISTOREL},
 		s = {'s', 's', ILOADS, ISTORES},
 		d = {'d', 'd', ILOADD, ISTORED},
@@ -191,12 +194,19 @@ qbetype(struct type *t)
 
 	if (t == &typevoid)
 		return v;
+	/* non-scalar types (structs, arrays) use 'l' class for QBE compatibility. */
 	if (!(t->prop & PROPSCALAR))
+		return l;
+	/* Pointers use 'l' class for QBE compatibility (memory addresses must be 'l').
+	 * The w65816 backend treats 'l' as 16-bit since that's the pointer size. */
+	if (t->kind == TYPEPOINTER)
 		return l;
 	switch (t->size) {
 	case 1: return t->u.basic.issigned ? sb : ub;
-	case 2: return t->u.basic.issigned ? sh : uh;
-	case 4: return t->prop & PROPFLOAT ? s : w;
+	/* 65816: 2-byte int uses 'w' class, 'h' data (halfword = 2 bytes) */
+	case 2: return wh;
+	/* 65816: 4-byte uses 'w' class, 'w' data (word = 4 bytes) for 32-bit values */
+	case 4: return t->prop & PROPFLOAT ? s : (struct qbetype){'w', 'w', ILOADL, ISTOREL};
 	case 8: return t->prop & PROPFLOAT ? d : l;
 	case 16: fatal("long double is not yet supported");
 	}
@@ -261,10 +271,11 @@ convert(struct func *f, struct type *dst, struct type *src, struct value *l)
 	enum instkind op;
 	struct value *r = NULL;
 	int class;
+	int toptr = (dst->kind == TYPEPOINTER);
 
 	if (src->kind == TYPEPOINTER)
 		src = &typeulong;
-	if (dst->kind == TYPEPOINTER)
+	if (toptr)
 		dst = &typeulong;
 	if (dst->kind == TYPEVOID)
 		return NULL;
@@ -326,6 +337,10 @@ convert(struct func *f, struct type *dst, struct type *src, struct value *l)
 			op = src->size < dst->size ? IEXTS : ITRUNCD;
 		}
 	}
+
+	/* Force 'l' class for pointer conversions (QBE uses 'l' for all pointers) */
+	if (toptr)
+		class = 'l';
 
 	return funcinst(f, op, class, l, r);
 }
@@ -444,8 +459,9 @@ funcstore(struct func *f, struct type *t, enum typequal tq, struct lvalue lval, 
 	struct qbetype qt;
 	int bits;
 
-	if (tq & QUALVOLATILE)
-		error(&tok.loc, "volatile store is not yet supported");
+	/* TODO: proper volatile semantics (memory barrier, no optimization) */
+	/* For now, treat volatile stores like normal stores for SNES hw access */
+	(void)(tq & QUALVOLATILE);
 	if (tq & QUALCONST)
 		error(&tok.loc, "cannot store to 'const' object");
 	tp = t->prop;
@@ -883,6 +899,14 @@ funcexpr(struct func *f, struct expr *e)
 		}
 		if (op == INONE)
 			fatal("internal error; unimplemented binary expression");
+		/* For pointer arithmetic, extend integer operand to 'l' type
+		 * since QBE requires add operands to match result type */
+		if (e->type->kind == TYPEPOINTER) {
+			if (e->u.binary.l->type->kind != TYPEPOINTER)
+				l = funcinst(f, IEXTUW, ptrclass, l, NULL);
+			if (e->u.binary.r->type->kind != TYPEPOINTER)
+				r = funcinst(f, IEXTUW, ptrclass, r, NULL);
+		}
 		return funcinst(f, op, qbetype(e->type).base, l, r);
 	case EXPRCOND:
 		b[0] = mkblock("cond_true");
