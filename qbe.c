@@ -1428,6 +1428,14 @@ emitdata(struct decl *d, struct init *init)
 		fputs("thread ", stdout);
 	if (d->linkage == LINKEXTERN)
 		fputs("export ", stdout);
+	/* Emit section ".rodata" for const-qualified data so the backend
+	 * keeps it in ROM instead of copying to RAM at startup.
+	 * Check both the declaration qualifier and the type qualifier
+	 * (for arrays, const is on the element type). */
+	if ((d->qual & QUALCONST) ||
+	    (d->type && d->type->qual & QUALCONST) ||
+	    (d->type && d->type->base && d->type->base->qual & QUALCONST))
+		fputs("section \".rodata\" ", stdout);
 	fputs("data ", stdout);
 	emitname(d->value);
 	printf(" = align %d { ", align);
