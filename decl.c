@@ -1134,7 +1134,7 @@ stringdecl(struct expr *expr)
 	entry = mapput(&strings, &key);
 	d = *entry;
 	if (!d) {
-		d = mkdecl("string", DECLOBJECT, expr->type, QUALNONE, LINKNONE);
+		d = mkdecl("string", DECLOBJECT, expr->type, QUALCONST, LINKNONE);
 		d->value = mkglobal(d);
 		emitdata(d, mkinit(0, expr->type->size, (struct bitfield){0}, expr));
 		*entry = d;
