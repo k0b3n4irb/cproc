@@ -50,9 +50,15 @@ mktype(enum typekind kind, enum typeprop prop)
 	t = xmalloc(sizeof(*t));
 	t->kind = kind;
 	t->prop = prop;
+	t->align = 0;
+	t->size = 0;
 	t->value = NULL;
+	t->base = NULL;
+	t->link = (struct list){NULL, NULL};
+	t->qual = QUALNONE;
 	t->incomplete = false;
 	t->flexible = false;
+	memset(&t->u, 0, sizeof(t->u));
 
 	return t;
 }
