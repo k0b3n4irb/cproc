@@ -1119,10 +1119,11 @@ decl(struct scope *s, struct func *f)
 	}
 }
 
+static struct map strings;
+
 struct decl *
 stringdecl(struct expr *expr)
 {
-	static struct map strings;
 	struct mapkey key;
 	void **entry;
 	struct decl *d;
@@ -1151,4 +1152,11 @@ emittentativedefns(void)
 		if (!d->defined)
 			defineobj(d, NULL, false, NULL);
 	}
+}
+
+void
+stringcleanup(void)
+{
+	if (strings.len)
+		mapfree(&strings, NULL);
 }

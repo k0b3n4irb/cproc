@@ -409,6 +409,7 @@ void error(const struct location *, const char *, ...);
 
 void scanfrom(const char *, FILE *);
 void scanopen(void);
+void scancleanup(void);
 void scansetloc(struct location loc);
 void scan(struct token *);
 
@@ -422,6 +423,7 @@ enum ppflags {
 extern enum ppflags ppflags;
 
 void ppinit(void);
+void ppcleanup(void);
 
 void next(void);
 bool peek(int);
@@ -495,10 +497,12 @@ struct type *typename(struct scope *, enum typequal *, struct expr **);
 struct decl *stringdecl(struct expr *);
 
 void emittentativedefns(void);
+void stringcleanup(void);
 
 /* scope */
 
 void scopeinit(void);
+void scopecleanup(void);
 struct scope *mkscope(struct scope *);
 struct scope *delscope(struct scope *);
 

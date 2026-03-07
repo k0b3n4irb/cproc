@@ -572,6 +572,7 @@ delfunc(struct func *f)
 		free(b);
 	}
 	mapfree(&f->gotos, free);
+	free(f->paramtemps);
 	free(f);
 }
 

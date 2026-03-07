@@ -674,3 +674,23 @@ consume(int kind)
 	next();
 	return true;
 }
+
+void
+ppcleanup(void)
+{
+	size_t i;
+	struct macro *m;
+
+	for (i = 0; i < macros.cap; ++i) {
+		if (macros.keys[i].str) {
+			m = macros.vals[i];
+			if (m) {
+				free(m->param);
+				free(m->token);
+				free(m);
+			}
+		}
+	}
+	mapfree(&macros, NULL);
+	free(ctx.val);
+}

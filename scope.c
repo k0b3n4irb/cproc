@@ -116,3 +116,12 @@ scopeputtag(struct scope *s, const char *name, struct type *t)
 	mapkey(&k, name, strlen(name));
 	*mapput(&s->tags, &k) = t;
 }
+
+void
+scopecleanup(void)
+{
+	if (filescope.decls.len)
+		mapfree(&filescope.decls, NULL);
+	if (filescope.tags.len)
+		mapfree(&filescope.tags, NULL);
+}

@@ -65,6 +65,13 @@ main(int argc, char *argv[])
 		emittentativedefns();
 	}
 
+	scancleanup();
+	ppcleanup();
+	if (!pponly) {
+		scopecleanup();
+		stringcleanup();
+	}
+
 	fflush(stdout);
 	if (ferror(stdout))
 		fatal("write failed");

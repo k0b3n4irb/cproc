@@ -453,6 +453,21 @@ scanclose(void)
 }
 
 void
+scancleanup(void)
+{
+	struct scanner *s;
+
+	while (scanner) {
+		s = scanner;
+		scanner = s->next;
+		if (s->file)
+			fclose(s->file);
+		free(s->buf.str);
+		free(s);
+	}
+}
+
+void
 scan(struct token *t)
 {
 	scanner->sawspace = false;
