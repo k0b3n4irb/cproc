@@ -20,9 +20,9 @@ cast(struct expr *expr)
 		if (size == 4)
 			expr->u.constant.f = (float)expr->u.constant.f;
 	} else if (expr->type->prop & PROPINT) {
-		expr->u.constant.u &= -1ull >> CHAR_BIT * sizeof(unsigned long long) - size * 8;
+		expr->u.constant.u &= -1ull >> (CHAR_BIT * sizeof(unsigned long long) - size * 8);
 		if (expr->type->u.basic.issigned) {
-			m = 1ull << size * 8 - 1;
+			m = 1ull << (size * 8 - 1);
 			expr->u.constant.u = (expr->u.constant.u ^ m) - m;
 		}
 	}
@@ -34,12 +34,15 @@ unary(struct expr *expr, enum tokenkind op, struct expr *l)
 	expr->kind = EXPRCONST;
 	if (l->type->prop & PROPFLOAT)
 		op |= F;
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wswitch"
 	switch (op) {
 	case TSUB:      expr->u.constant.u = -l->u.constant.u; break;
 	case TSUB|F:    expr->u.constant.f = -l->u.constant.f; break;
 	default:
 		fatal("internal error; unknown unary expression");
 	}
+#pragma GCC diagnostic pop
 	cast(expr);
 }
 
@@ -51,6 +54,8 @@ binary(struct expr *expr, enum tokenkind op, struct expr *l, struct expr *r)
 		op |= F;
 	else if (l->type->prop & PROPINT && l->type->u.basic.issigned)
 		op |= S;
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wswitch"
 	switch (op) {
 	case TMUL:
 	case TMUL|S:     expr->u.constant.u = l->u.constant.u * r->u.constant.u; break;
@@ -97,6 +102,7 @@ binary(struct expr *expr, enum tokenkind op, struct expr *l, struct expr *r)
 	default:
 		fatal("internal error; unknown binary expression");
 	}
+#pragma GCC diagnostic pop
 	cast(expr);
 }
 
@@ -139,6 +145,8 @@ eval(struct expr *expr)
 				l->kind = EXPRIDENT;
 				expr->base = l;
 				break;
+			default:
+				break;
 			}
 			break;
 		case TMUL:
@@ -180,7 +188,7 @@ eval(struct expr *expr)
 			other forms of constant expressions (6.6p10), and some
 			programs expect this functionality.
 			*/
-			if (t->kind == TYPEPOINTER || t->prop & PROPINT && t->size == typelong.size)
+			if (t->kind == TYPEPOINTER || (t->prop & PROPINT && t->size == typelong.size))
 				expr = l;
 		}
 		break;
@@ -219,6 +227,8 @@ eval(struct expr *expr)
 				break;
 			binary(expr, expr->op, l, r);
 		}
+		break;
+	default:
 		break;
 	}
 

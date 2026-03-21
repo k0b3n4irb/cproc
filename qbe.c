@@ -412,7 +412,7 @@ funcbits(struct func *f, struct type *t, struct value *v, struct bitfield b)
 	class = t->size <= 4 ? 'w' : 'l';
 	bits = b.after;
 	if (bits) {
-		bits += (t->size + 3 & ~3) - t->size << 3;
+		bits += (((t->size + 3) & ~3) - t->size) << 3;
 		v = funcinst(f, ISHL, class, v, mkintconst(bits));
 	}
 	bits += b.before;
@@ -429,7 +429,7 @@ funccopy(struct func *f, struct value *dst, struct value *src, unsigned long lon
 	struct value *tmp, *inc;
 	unsigned long long off;
 
-	assert((align & align - 1) == 0);
+	assert((align & (align - 1)) == 0);
 	class = 'w';
 	switch (align) {
 	case 1: load = ILOADUB, store = ISTOREB; break;
@@ -465,7 +465,7 @@ funcstore(struct func *f, struct type *t, enum typequal tq, struct lvalue lval, 
 	if (tq & QUALCONST)
 		error(&tok.loc, "cannot store to 'const' object");
 	tp = t->prop;
-	assert(!lval.bits.before && !lval.bits.after || tp & PROPINT);
+	assert((!lval.bits.before && !lval.bits.after) || tp & PROPINT);
 	r = v;
 	switch (t->kind) {
 	case TYPESTRUCT:
@@ -481,7 +481,7 @@ funcstore(struct func *f, struct type *t, enum typequal tq, struct lvalue lval, 
 		qt = qbetype(t);
 		bits = lval.bits.before + lval.bits.after;
 		if (bits) {
-			mask = 0xffffffffffffffffu >> 64 - t->size * 8 + bits << lval.bits.before;
+			mask = (0xffffffffffffffffu >> (64 - t->size * 8 + bits)) << lval.bits.before;
 			v = funcinst(f, ISHL, qt.base, v, mkintconst(lval.bits.before));
 			r = funcbits(f, t, v, lval.bits);
 			v = funcinst(f, IAND, qt.base, v, mkintconst(mask));
@@ -509,6 +509,8 @@ funcload(struct func *f, struct type *t, struct lvalue lval)
 	case TYPEUNION:
 	case TYPEARRAY:
 		return lval.addr;
+	default:
+		break;
 	}
 	qt = qbetype(t);
 	v = funcinst(f, qt.load, qt.base, lval.addr, NULL);
@@ -564,7 +566,7 @@ delfunc(struct func *f)
 	struct block *b;
 	struct inst **inst;
 
-	while (b = f->start) {
+	while ((b = f->start)) {
 		f->start = b->next;
 		arrayforeach (&b->insts, inst)
 			free(*inst);
@@ -795,6 +797,8 @@ funcexpr(struct func *f, struct expr *e)
 		case TSUB:
 			r = funcexpr(f, e->base);
 			return funcinst(f, INEG, qbetype(e->type).base, r, NULL);
+		default:
+			break;
 		}
 		fatal("internal error; unknown unary expression");
 		break;
@@ -915,6 +919,8 @@ funcexpr(struct func *f, struct expr *e)
 			else
 				op = t->prop & PROPFLOAT ? ICNED : ICNEL;
 			break;
+		default:
+			break;
 		}
 		if (op == INONE)
 			fatal("internal error; unimplemented binary expression");
@@ -997,6 +1003,8 @@ funcexpr(struct func *f, struct expr *e)
 		if (e->base)
 			funcexpr(f, e->base);
 		return t->u.array.size;
+	default:
+		break;
 	}
 	fatal("unimplemented expression %d", e->kind);
 	return NULL;
@@ -1016,7 +1024,7 @@ zero(struct func *func, struct value *addr, int align, unsigned long long offset
 	int a = 1;
 
 	while (offset < end) {
-		if ((align - (offset & align - 1)) & a) {
+		if ((align - (offset & (align - 1))) & a) {
 			tmp = offset ? funcinst(func, IADD, ptrclass, addr, mkintconst(offset)) : addr;
 			funcinst(func, store[a], 0, &z, tmp);
 			offset += a;
@@ -1174,7 +1182,7 @@ emittype(struct type *t)
 	struct type *sub;
 	unsigned long long off;
 
-	if (t->value || t->kind != TYPESTRUCT && t->kind != TYPEUNION)
+	if (t->value || (t->kind != TYPESTRUCT && t->kind != TYPEUNION))
 		return;
 	t->value = xmalloc(sizeof(*t->value));
 	t->value->kind = VALUE_TYPE;

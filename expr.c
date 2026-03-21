@@ -35,7 +35,7 @@ delexpr(struct expr *e)
 	switch (e->kind) {
 	case EXPRCALL:
 		delexpr(e->base);
-		while (sub = e->u.call.args) {
+		while ((sub = e->u.call.args)) {
 			e->u.call.args = sub->next;
 			delexpr(sub);
 		}
@@ -65,10 +65,12 @@ delexpr(struct expr *e)
 		break;
 	*/
 	case EXPRCOMMA:
-		while (sub = e->base) {
+		while ((sub = e->base)) {
 			e->base = sub->next;
 			delexpr(sub);
 		}
+		break;
+	default:
 		break;
 	}
 	free(e);
@@ -113,6 +115,8 @@ decay(struct expr *e)
 		e = mkunaryexpr(TBAND, e);
 		e->decayed = true;
 		break;
+	default:
+		break;
 	}
 
 	return e;
@@ -156,6 +160,8 @@ mkunaryexpr(enum tokenkind op, struct expr *base)
 			expr->op = op;
 		}
 		return decay(expr);
+	default:
+		break;
 	}
 	/* other unary operators get compiled as equivalent binary ones */
 	fatal("internal error: unknown unary operator %d", op);
@@ -334,7 +340,7 @@ mkbinaryexpr(struct location *loc, enum tokenkind op, struct expr *l, struct exp
 			t = commonreal(&l, &r);
 			break;
 		}
-		if (l->type->kind != TYPEPOINTER || !(rp & PROPINT) && r->type->kind != TYPEPOINTER)
+		if (l->type->kind != TYPEPOINTER || (!(rp & PROPINT) && r->type->kind != TYPEPOINTER))
 			error(loc, "invalid operands to '-' operator");
 		if (l->type->base->incomplete || l->type->base->kind == TYPEFUNC)
 			error(loc, "pointer operand to '-' must be to complete object type");
@@ -1191,6 +1197,7 @@ precedence(enum tokenkind t)
 	case TMUL:
 	case TDIV:
 	case TMOD:     return 9;
+	default:       break;
 	}
 	return -1;
 }

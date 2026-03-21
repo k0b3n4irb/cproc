@@ -193,6 +193,8 @@ again:
 				goto again;
 			f = ctxpush(m->arg[i].token, m->arg[i].ntoken, NULL, space);
 			break;
+		default:
+			break;
 		}
 		/* XXX: token concatenation */
 	}
@@ -491,11 +493,12 @@ expandfunc(struct macro *m)
 			if (macrodepth <= depth) {
 				/* adjust current macro depth, in case it got shallower */
 				depth = macrodepth;
-				if (paren == 0 && (t->kind == TRPAREN || t->kind == TCOMMA && !(p->flags & PARAMVAR)))
+				if (paren == 0 && (t->kind == TRPAREN || (t->kind == TCOMMA && !(p->flags & PARAMVAR))))
 					break;
 				switch (t->kind) {
 				case TLPAREN: ++paren; break;
 				case TRPAREN: --paren; break;
+				default: break;
 				}
 				if (p->flags & PARAMSTR)
 					stringize(&str, t);
@@ -631,7 +634,7 @@ next(void)
 	struct token *t;
 
 	do t = rawnext();
-	while (expand(t) || t->kind == TNEWLINE && !(ppflags & PPNEWLINE));
+	while (expand(t) || (t->kind == TNEWLINE && !(ppflags & PPNEWLINE)));
 	tok = *t;
 	if (tok.kind == TIDENT)
 		keyword(&tok);

@@ -111,6 +111,7 @@ typerank(struct type *t)
 	case TYPEINT:   return 4;
 	case TYPELONG:  return 5;
 	case TYPELLONG: return 6;
+	default: break;
 	}
 	fatal("internal error; unhandled integer type");
 	return 0;
@@ -130,8 +131,8 @@ typecompatible(struct type *t1, struct type *t2)
 		type, but not with each other (unless they are the
 		same type)
 		*/
-		return t1->kind == TYPEENUM && t2 == t1->base ||
-		       t2->kind == TYPEENUM && t1 == t2->base;
+		return (t1->kind == TYPEENUM && t2 == t1->base) ||
+		       (t2->kind == TYPEENUM && t1 == t2->base);
 	}
 	switch (t1->kind) {
 	case TYPEPOINTER:
@@ -156,6 +157,8 @@ typecompatible(struct type *t1, struct type *t2)
 		goto derived;
 	derived:
 		return t1->qual == t2->qual && typecompatible(t1->base, t2->base);
+	default:
+		break;
 	}
 	return false;
 }
@@ -239,6 +242,8 @@ typeadjust(struct type *t, enum typequal *tq)
 		assert(*tq == QUALNONE);
 		t = mkpointertype(t, QUALNONE);
 		break;
+	default:
+		break;
 	}
 
 	return t;
@@ -272,6 +277,6 @@ typehasint(struct type *t, unsigned long long i, bool sign)
 {
 	assert(t->prop & PROPINT);
 	if (sign && i >= -1ull << 63)
-		return t->u.basic.issigned && i >= -1ull << (t->size << 3) - 1;
-	return i <= 0xffffffffffffffffull >> (8 - t->size << 3) + t->u.basic.issigned;
+		return t->u.basic.issigned && i >= -1ull << ((t->size << 3) - 1);
+	return i <= 0xffffffffffffffffull >> (((8 - t->size) << 3) + t->u.basic.issigned);
 }

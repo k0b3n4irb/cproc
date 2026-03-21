@@ -46,6 +46,7 @@ parseattr(struct attr *a, enum attrkind allowed, enum attrprefix prefix)
 	}
 	kind = 0;
 	switch (prefix) {
+	default: break;
 	case PREFIXGNU:
 		prefixname = "GNU ";
 		if (strcmp(name, "aligned") == 0) {
@@ -54,7 +55,7 @@ parseattr(struct attr *a, enum attrkind allowed, enum attrprefix prefix)
 				unsigned long long i;
 
 				i = intconstexpr(&filescope, false);
-				if (!i || i & i - 1 || i > INT_MAX)
+				if (!i || i & (i - 1) || i > INT_MAX)
 					error(&tok.loc, "invalid alignment %llu", i);
 				if (a)
 					a->align = i;
@@ -83,6 +84,7 @@ parseattr(struct attr *a, enum attrkind allowed, enum attrprefix prefix)
 			switch (tok.kind) {
 			case TLPAREN: ++paren; break;
 			case TRPAREN: --paren; break;
+			default: break;
 			}
 		}
 	}

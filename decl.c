@@ -257,7 +257,7 @@ tagspec(struct scope *s)
 					et = typehasint(&typeint, value, e->type->u.basic.issigned) ? &typeint : e->type;
 				else if (!typehasint(et, value, e->type->u.basic.issigned))
 					goto invalid;
-			} else if (value == 0 && !et->u.basic.issigned || value == 1ull << 63 && et->u.basic.issigned) {
+			} else if ((value == 0 && !et->u.basic.issigned) || (value == 1ull << 63 && et->u.basic.issigned)) {
 				error(&tok.loc, "no %ssigned integer type can represent enumerator value", et->u.basic.issigned ? "" : "un");
 			} else if (!typehasint(et, value, et->u.basic.issigned)) {
 				if (t->base) {
@@ -309,6 +309,8 @@ tagspec(struct scope *s)
 			t->align = t->base->align;
 			t->u.basic.issigned = t->base->u.basic.issigned;
 		}
+	default:
+		break;
 	}
 	t->incomplete = false;
 
@@ -500,7 +502,7 @@ done:
 	default:
 		error(&tok.loc, "invalid combination of type specifiers");
 	}
-	if (!t && (tq || sc && *sc || fs && *fs))
+	if (!t && (tq || (sc && *sc) || (fs && *fs)))
 		error(&tok.loc, "declaration has no type specifier");
 	/*
 	TODO: consider delaying attribute parsing to declarator(),
@@ -707,6 +709,8 @@ declarator(struct scope *s, struct qualtype base, char **name, struct scope **fu
 					t->u.array.size = NULL;
 				}
 			}
+			break;
+		default:
 			break;
 		}
 		base.type = t;
@@ -1110,6 +1114,8 @@ decl(struct scope *s, struct func *f)
 			} else if (funcscope) {
 				delscope(funcscope);
 			}
+			break;
+		default:
 			break;
 		}
 		if (consume(TSEMICOLON))
