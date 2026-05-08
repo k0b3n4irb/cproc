@@ -25,11 +25,18 @@ struct type typeuchar   = INTTYPE(TYPECHAR, 1, false, PROPCHAR);
 struct type typeshort   = INTTYPE(TYPESHORT, 2, true, 0);
 struct type typeushort  = INTTYPE(TYPESHORT, 2, false, 0);
 
-struct type typeint     = INTTYPE(TYPEINT, 4, true, 0);
-struct type typeuint    = INTTYPE(TYPEINT, 4, false, 0);
+/* w65816 / SNES type sizes — chantier A1 (2026-05-08).
+ * `int`/`long`/pointer sizes were inherited from cproc's host-target defaults
+ * (int=4, long=8, pointer=8) which are wrong for a 16-bit CPU. The QBE w65816
+ * backend already treats them as 16-bit at emit time (see compiler/qbe/w65816/
+ * abi.c hardcoded 2-byte param slots, and the d929b94 patch's `'l'` class
+ * reinterpretation), so cproc's IR sizes were inconsistent with reality.
+ * Aligned here. `long long` stays at 8 per C99 (must be >= 64-bit). */
+struct type typeint     = INTTYPE(TYPEINT, 2, true, 0);
+struct type typeuint    = INTTYPE(TYPEINT, 2, false, 0);
 
-struct type typelong    = INTTYPE(TYPELONG, 8, true, 0);
-struct type typeulong   = INTTYPE(TYPELONG, 8, false, 0);
+struct type typelong    = INTTYPE(TYPELONG, 4, true, 0);
+struct type typeulong   = INTTYPE(TYPELONG, 4, false, 0);
 
 struct type typellong   = INTTYPE(TYPELLONG, 8, true, 0);
 struct type typeullong  = INTTYPE(TYPELLONG, 8, false, 0);
