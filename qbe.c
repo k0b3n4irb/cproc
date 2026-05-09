@@ -53,6 +53,12 @@ struct qbetype {
 struct inst {
 	enum instkind kind;
 	int class;
+	int volat;     /* OpenSNES patch (chantier A2): volatile flag — when
+	                * this field is non-zero we emit the `volat` keyword
+	                * before the op so QBE's loadopt / promote / gcm
+	                * passes leave the access intact. Threaded through
+	                * funcload / funcstore from the C-level
+	                * QUALVOLATILE bit on the type or expression. */
 	struct value res, *arg[2];
 };
 
@@ -241,6 +247,7 @@ mkinst(struct func *f, int op, int class, struct value *arg0, struct value *arg1
 	inst = xmalloc(sizeof(*inst));
 	inst->kind = op;
 	inst->class = class;
+	inst->volat = 0;
 	inst->arg[0] = arg0;
 	inst->arg[1] = arg1;
 	if (class && op != IARG)
@@ -263,6 +270,31 @@ funcinst(struct func *f, int op, int class, struct value *arg0, struct value *ar
 	inst = mkinst(f, op, class, arg0, arg1);
 	arrayaddptr(&f->end->insts, inst);
 	return &inst->res;
+}
+
+/* OpenSNES patch (chantier A2, 2026-05-09): wrapper around funcinst
+ * that flags the emitted instruction as volatile. Returns the same
+ * value funcinst returns; callers in funcload/funcstore use this
+ * variant when the C-level type carries QUALVOLATILE so QBE's
+ * loadopt / promote / gcm passes keep their hands off the access. */
+static struct value *
+funcinst_volat(struct func *f, int op, int class, struct value *arg0, struct value *arg1)
+{
+	struct value *r;
+	struct inst **ptr_arr;
+	size_t count;
+
+	r = funcinst(f, op, class, arg0, arg1);
+	/* The instruction we just appended is the last one in the
+	 * current block. Walk back to flag it. The block's `insts`
+	 * is `struct array` with `len` measured in BYTES (not in
+	 * struct-pointer count), so divide before indexing. */
+	if (f->end->insts.len >= sizeof(struct inst *)) {
+		ptr_arr = f->end->insts.val;
+		count = f->end->insts.len / sizeof(struct inst *);
+		ptr_arr[count - 1]->volat = 1;
+	}
+	return r;
 }
 
 static struct value *
@@ -458,10 +490,15 @@ funcstore(struct func *f, struct type *t, enum typequal tq, struct lvalue lval, 
 	unsigned long long mask;
 	struct qbetype qt;
 	int bits;
+	int is_volat;
 
-	/* TODO: proper volatile semantics (memory barrier, no optimization) */
-	/* For now, treat volatile stores like normal stores for SNES hw access */
-	(void)(tq & QUALVOLATILE);
+	/* OpenSNES patch (chantier A2, 2026-05-09): the volatile
+	 * qualifier on the destination type means this store has
+	 * observable side effects (writing an MMIO register, signalling
+	 * an NMI handshake, …) and must not be coalesced or eliminated
+	 * by QBE. The `volat` keyword on the emitted store instruction
+	 * tells loadopt / promote / gcm to skip the affected store. */
+	is_volat = (tq & QUALVOLATILE) ? 1 : 0;
 	if (tq & QUALCONST)
 		error(&tok.loc, "cannot store to 'const' object");
 	tp = t->prop;
@@ -481,28 +518,41 @@ funcstore(struct func *f, struct type *t, enum typequal tq, struct lvalue lval, 
 		qt = qbetype(t);
 		bits = lval.bits.before + lval.bits.after;
 		if (bits) {
+			/* Bitfield stores: the read-modify-write sequence
+			 * uses an internal load that must also honour
+			 * volatile (per the C standard, a bitfield write to
+			 * a volatile container is a single volatile access
+			 * for both read and write halves). The shift / mask /
+			 * or arithmetic itself is not volatile, only the
+			 * bracketing load and the final store. */
 			mask = (0xffffffffffffffffu >> (64 - t->size * 8 + bits)) << lval.bits.before;
 			v = funcinst(f, ISHL, qt.base, v, mkintconst(lval.bits.before));
 			r = funcbits(f, t, v, lval.bits);
 			v = funcinst(f, IAND, qt.base, v, mkintconst(mask));
 			v = funcinst(f, IOR, qt.base, v,
 				funcinst(f, IAND, qt.base,
-					funcinst(f, qt.load, qt.base, lval.addr, NULL),
+					(is_volat
+					 ? funcinst_volat(f, qt.load, qt.base, lval.addr, NULL)
+					 : funcinst(f, qt.load, qt.base, lval.addr, NULL)),
 					mkintconst(~mask)
 				)
 			);
 		}
-		funcinst(f, qt.store, 0, v, lval.addr);
+		if (is_volat)
+			funcinst_volat(f, qt.store, 0, v, lval.addr);
+		else
+			funcinst(f, qt.store, 0, v, lval.addr);
 		break;
 	}
 	return r;
 }
 
 static struct value *
-funcload(struct func *f, struct type *t, struct lvalue lval)
+funcload(struct func *f, struct type *t, enum typequal tq, struct lvalue lval)
 {
 	struct value *v;
 	struct qbetype qt;
+	int is_volat;
 
 	switch (t->kind) {
 	case TYPESTRUCT:
@@ -513,7 +563,15 @@ funcload(struct func *f, struct type *t, struct lvalue lval)
 		break;
 	}
 	qt = qbetype(t);
-	v = funcinst(f, qt.load, qt.base, lval.addr, NULL);
+	/* OpenSNES patch (chantier A2): the access is volatile if the
+	 * lvalue's qualifier carries QUALVOLATILE. The qualifier comes
+	 * from the C-level type/expr and threads through here so the
+	 * generated load instruction can be tagged for QBE. */
+	is_volat = (tq & QUALVOLATILE) ? 1 : 0;
+	if (is_volat)
+		v = funcinst_volat(f, qt.load, qt.base, lval.addr, NULL);
+	else
+		v = funcinst(f, qt.load, qt.base, lval.addr, NULL);
 	return funcbits(f, t, v, lval.bits);
 }
 
@@ -730,7 +788,7 @@ funcexpr(struct func *f, struct expr *e)
 	case EXPRIDENT:
 		d = e->u.ident.decl;
 		switch (d->kind) {
-		case DECLOBJECT: return funcload(f, e->type, (struct lvalue){d->value});
+		case DECLOBJECT: return funcload(f, e->type, e->qual | e->type->qual, (struct lvalue){d->value});
 		case DECLCONST:  return d->value;
 		default:
 			fatal("unimplemented declaration kind %d", d->kind);
@@ -745,10 +803,10 @@ funcexpr(struct func *f, struct expr *e)
 	case EXPRBITFIELD:
 	case EXPRCOMPOUND:
 		lval = funclval(f, e);
-		return funcload(f, e->type, lval);
+		return funcload(f, e->type, e->qual | e->type->qual, lval);
 	case EXPRINCDEC:
 		lval = funclval(f, e->base);
-		l = funcload(f, e->base->type, lval);
+		l = funcload(f, e->base->type, e->base->qual | e->base->type->qual, lval);
 		t = e->type;
 		if (t->kind == TYPEPOINTER) {
 			r = mkintconst(t->base->size);
@@ -793,7 +851,7 @@ funcexpr(struct func *f, struct expr *e)
 			return lval.addr;
 		case TMUL:
 			r = funcexpr(f, e->base);
-			return funcload(f, e->type, (struct lvalue){r});
+			return funcload(f, e->type, e->qual | e->type->qual, (struct lvalue){r});
 		case TSUB:
 			r = funcexpr(f, e->base);
 			return funcinst(f, INEG, qbetype(e->type).base, r, NULL);
@@ -1239,11 +1297,21 @@ emitinst(struct inst **instp, struct inst **instend)
 
 	putchar('\t');
 	assert(inst->kind < LEN(instname));
+	/* OpenSNES patch (chantier A2, 2026-05-09): when this inst was
+	 * tagged volatile by funcload / funcstore, emit the `volat`
+	 * keyword. Position depends on whether the instruction has a
+	 * result: for loads it goes between `=cls` and the op
+	 * (`%t =w volat loaduh ...`); for stores it goes at the line
+	 * start, before the op (`volat storeh ...`). */
 	if (inst->res.kind) {
 		emitvalue(&inst->res);
 		fputs(" =", stdout);
 		emitclass(inst->class, inst->arg[1]);
 		putchar(' ');
+		if (inst->volat)
+			fputs("volat ", stdout);
+	} else if (inst->volat) {
+		fputs("volat ", stdout);
 	}
 	fputs(instname[inst->kind], stdout);
 	putchar(' ');
