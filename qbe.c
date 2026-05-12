@@ -1402,6 +1402,13 @@ emitfunc(struct func *f, bool global)
 	}
 	if (global)
 		puts("export");
+	/* OpenSNES function inlining chantier: emit `inline` linkage hint
+	 * when the C source carried the `inline` keyword. QBE parses this
+	 * into Lnk.inline_hint; qbe/inline.c uses it as the eligibility
+	 * gate. Standalone body is still emitted so non-inlined call sites
+	 * have a target. */
+	if (f->decl->u.func.hasinlinekw)
+		fputs("inline ", stdout);
 	fputs("function ", stdout);
 	if (f->type->base != &typevoid) {
 		emitclass(qbetype(f->type->base).base, f->type->base->value);

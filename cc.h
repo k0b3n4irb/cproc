@@ -286,6 +286,12 @@ struct decl {
 			/* the function might have an "inline definition" (C11 6.7.4p7) */
 			bool inlinedefn;
 			bool isnoreturn;
+			/* OpenSNES function inlining chantier: the `inline` keyword
+			 * was present on this function (independent of C99
+			 * inline-definition semantics). Forwarded to QBE IR via
+			 * `inline` linkage hint; qbe/inline.c uses it as the
+			 * eligibility gate. */
+			bool hasinlinekw;
 		} func;
 		unsigned long long enumconst;
 		enum builtinkind builtin;

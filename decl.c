@@ -1092,6 +1092,7 @@ decl(struct scope *s, struct func *f)
 			d->value = mkglobal(d);
 			d->u.func.inlinedefn = d->linkage == LINKEXTERN && fs & FUNCINLINE && !(sc & SCEXTERN) && (!prior || prior->u.func.inlinedefn);
 			d->u.func.isnoreturn = fs & FUNCNORETURN;
+			d->u.func.hasinlinekw = (fs & FUNCINLINE) != 0;
 			if (tok.kind == TLBRACE) {
 				if (!allowfunc)
 					error(&tok.loc, "function definition not allowed");
