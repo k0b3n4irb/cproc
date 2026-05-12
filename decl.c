@@ -1105,9 +1105,15 @@ decl(struct scope *s, struct func *f)
 				stmt(f, s);
 				if (d->u.func.isnoreturn)
 					funchlt(f);
-				/* XXX: need to keep track of function in case a later declaration specifies extern */
-				if (!d->u.func.inlinedefn)
-					emitfunc(f, d->linkage == LINKEXTERN);
+				/* OpenSNES function-inlining chantier: ALWAYS emit the
+				 * function body. For C99 inline definitions
+				 * (inlinedefn=true), the QBE inline pass needs the body
+				 * in the IR stream to splice at call sites. The pass
+				 * suppresses standalone emission of fully-inlined
+				 * functions at QBE's final emit stage, restoring C99
+				 * semantics (inline definition is not an external
+				 * definition) for the linker. */
+				emitfunc(f, d->linkage == LINKEXTERN);
 				s = delscope(s);
 				delfunc(f);
 				d->defined = true;
