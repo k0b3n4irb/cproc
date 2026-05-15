@@ -211,8 +211,14 @@ qbetype(struct type *t)
 	case 1: return t->u.basic.issigned ? sb : ub;
 	/* 65816: 2-byte int uses 'w' class, 'h' data (halfword = 2 bytes) */
 	case 2: return wh;
-	/* 65816: 4-byte uses 'w' class, 'w' data (word = 4 bytes) for 32-bit values */
-	case 4: return t->prop & PROPFLOAT ? s : (struct qbetype){'w', 'w', ILOADL, ISTOREL};
+	/* 65816 (A1-followup chantier): 4-byte non-float types map to QBE class
+	 * 'l' (= Kl in the w65816 backend), a 32-bit pair lowering. The 'w' /
+	 * 'w' mapping that shipped with A1 silently truncated every long
+	 * arithmetic op to 16 bits — Kl handlers for Oadd/Osub/Oand/Oor/Oxor/
+	 * Oneg/Oshl/Oshr/Osar/Omul/Odiv/Orem/Ocmp*l/Oextsw/Oextuw all live in
+	 * the backend (Sessions 2-6 of the chantier), but only fired for
+	 * pointers until this flip. */
+	case 4: return t->prop & PROPFLOAT ? s : (struct qbetype){'l', 'l', ILOADL, ISTOREL};
 	case 8: return t->prop & PROPFLOAT ? d : l;
 	case 16: fatal("long double is not yet supported");
 	}
