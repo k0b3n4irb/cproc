@@ -579,6 +579,7 @@ void funchlt(struct func *);
 struct gotolabel *funcgoto(struct func *, char *);
 void funcswitch(struct func *, struct value *, struct switchcases *, struct block *);
 void funcinit(struct func *, struct decl *, struct init *, bool);
+void funcdbgloc(struct func *, int);
 
 void emitfunc(struct func *, bool);
 void emitdata(struct decl *,  struct init *);

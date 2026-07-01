@@ -102,3 +102,6 @@ OP(ICALL,    "call")
 /* variadic */
 OP(IVASTART, "vastart")
 OP(IVAARG,   "vaarg")
+
+/* debug — source line for Cooper source-level debugging */
+OP(IDBGLOC,  "dbgloc")

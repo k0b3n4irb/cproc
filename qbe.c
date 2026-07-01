@@ -278,6 +278,17 @@ funcinst(struct func *f, int op, int class, struct value *arg0, struct value *ar
 	return &inst->res;
 }
 
+/* OpenSNES / Cooper source-level debug: emit `dbgloc <line>` for the current C
+ * source line. QBE's w65816 backend renders it as a `; @cline <n>` comment that
+ * Cooper joins with the .sym PC->asm-line table to map PC -> main.c:line. Skipped
+ * when the block is already terminated (avoids spurious dead blocks). */
+void
+funcdbgloc(struct func *f, int line)
+{
+	if (line > 0 && !f->end->jump.kind)
+		funcinst(f, IDBGLOC, 0, mkintconst(line), NULL);
+}
+
 /* OpenSNES patch (chantier A2, 2026-05-09): wrapper around funcinst
  * that flags the emitted instruction as volatile. Returns the same
  * value funcinst returns; callers in funcload/funcstore use this
@@ -404,6 +415,105 @@ calcvla(struct func *f, struct type *t)
 	}
 }
 
+/* Cooper -g: encode a C local's name + a short type code into its alloc temp
+ * name (e.g. "u16_pad", "s8_dx", "p_ptr", "g_cfg") so the w65816 backend can
+ * surface `; @dbglocal <name> <offset>` and the debugger read it typed. The
+ * trailing ".<id>" that emitname() appends keeps it unique. */
+static char *
+dbgTempName(struct decl *d)
+{
+	char buf[300];
+	char cls;
+	struct type *t = d->type;
+	char *s;
+	int n;
+
+	/* class: u/s = unsigned/signed integer, p = pointer, a = array,
+	 * g = struct/union aggregate, f = float, v = other. Size is in BYTES
+	 * (t->size), so Cooper reads exactly that many bytes for any type. */
+	switch (t->kind) {
+	case TYPEPOINTER: cls = 'p'; break;
+	case TYPEARRAY:   cls = 'a'; break;
+	case TYPESTRUCT:
+	case TYPEUNION:   cls = 'g'; break;
+	case TYPEFLOAT:
+	case TYPEDOUBLE:
+	case TYPELDOUBLE: cls = 'f'; break;
+	case TYPEBOOL: case TYPECHAR: case TYPESHORT: case TYPEINT:
+	case TYPEENUM: case TYPELONG: case TYPELLONG:
+		cls = t->u.basic.issigned ? 's' : 'u'; break;
+	default: cls = 'v';
+	}
+	n = snprintf(buf, sizeof buf, "%c%llu_%s", cls, (unsigned long long)t->size, d->name);
+	if (n < 0) {
+		return NULL;
+	}
+	if (n >= (int)sizeof buf) {
+		n = sizeof buf - 1;
+	}
+	s = xmalloc(n + 1);
+	memcpy(s, buf, n);
+	s[n] = '\0';
+	return s;
+}
+
+/* Cooper aggregate expansion: cproc writes a `.dbg` sidecar (path in
+ * $CC65816_DBG) with the recursive type layout of each aggregate local, keyed by
+ * `loc <func> <name> <type>`. Grammar: scalar `u2`/`s2`/`p2`/`f4`, array
+ * `[TYPE;count]`, struct/union `{field:TYPE@off;...}`. Cooper joins this with the
+ * `@dbglocal` frame offset to expand structs → fields and arrays → elements. */
+static FILE *
+dbgFile(void)
+{
+	static FILE *fp;
+	static int tried;
+	if (!tried) {
+		const char *p = getenv("CC65816_DBG");
+		tried = 1;
+		if (p && *p) {
+			fp = fopen(p, "w");
+		}
+	}
+	return fp;
+}
+
+static void
+writeDbgType(FILE *df, struct type *t)
+{
+	struct member *m;
+	unsigned long long count;
+
+	switch (t->kind) {
+	case TYPEPOINTER: fprintf(df, "p%llu", (unsigned long long)t->size); break;
+	case TYPEFLOAT:
+	case TYPEDOUBLE:
+	case TYPELDOUBLE: fprintf(df, "f%llu", (unsigned long long)t->size); break;
+	case TYPEARRAY:
+		count = (t->base && t->base->size) ? t->size / t->base->size : 0;
+		fprintf(df, "a%llu[", (unsigned long long)t->size);
+		if (t->base) {
+			writeDbgType(df, t->base);
+		}
+		fprintf(df, ";%llu]", count);
+		break;
+	case TYPESTRUCT:
+	case TYPEUNION:
+		fprintf(df, "g%llu{", (unsigned long long)t->size);
+		for (m = t->u.structunion.members; m; m = m->next) {
+			fprintf(df, "%s:", m->name ? m->name : "?");
+			writeDbgType(df, m->type);
+			fprintf(df, "@%llu;", (unsigned long long)m->offset);
+		}
+		fputc('}', df);
+		break;
+	case TYPEBOOL: case TYPECHAR: case TYPESHORT: case TYPEINT:
+	case TYPEENUM: case TYPELONG: case TYPELLONG:
+		fprintf(df, "%c%llu", t->u.basic.issigned ? 's' : 'u', (unsigned long long)t->size);
+		break;
+	default: fprintf(df, "v%llu", (unsigned long long)t->size);
+	}
+}
+
 static void
 funcalloc(struct func *f, struct decl *d)
 {
@@ -439,6 +549,20 @@ funcalloc(struct func *f, struct decl *d)
 		v = funcinst(f, IAND, ptrclass, v, mkintconst(-align));
 	}
 	d->value = v;
+	if (d->name && d->kind == DECLOBJECT) {
+		v->u.name = dbgTempName(d);
+		/* Aggregate locals: emit their type layout to the .dbg sidecar for
+		 * struct-field / array-element expansion in the debugger. */
+		if (d->type->kind == TYPESTRUCT || d->type->kind == TYPEUNION || d->type->kind == TYPEARRAY) {
+			FILE *df = dbgFile();
+			if (df && f->name) {
+				fprintf(df, "loc %s %s ", f->name, d->name);
+				writeDbgType(df, d->type);
+				fputc('\n', df);
+				fflush(df);
+			}
+		}
+	}
 	f->end = end;
 }
 

@@ -71,6 +71,8 @@ stmt(struct func *f, struct scope *s)
 	struct switchcases swtch;
 
 	attr(NULL, 0);
+	/* Cooper source-level debug: tag each statement with its C source line. */
+	funcdbgloc(f, (int)tok.loc.line);
 	switch (tok.kind) {
 	/* 6.8.2 Compound statement */
 	case TLBRACE:
