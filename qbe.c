@@ -230,6 +230,7 @@ qbetype(struct type *t)
 static void emittype(struct type *);
 static void emitname(struct value *);
 static void emitvalue(struct value *);
+static int cooperDebug(void);
 
 static void
 functemp(struct func *f, struct value *v)
@@ -285,7 +286,7 @@ funcinst(struct func *f, int op, int class, struct value *arg0, struct value *ar
 void
 funcdbgloc(struct func *f, int line)
 {
-	if (line > 0 && !f->end->jump.kind)
+	if (cooperDebug() && line > 0 && !f->end->jump.kind)
 		funcinst(f, IDBGLOC, 0, mkintconst(line), NULL);
 }
 
@@ -413,6 +414,21 @@ calcvla(struct func *f, struct type *t)
 		basesize = t->base->size ? mkintconst(t->base->size) : t->base->u.array.size;
 		t->u.array.size = funcinst(f, IMUL, 'l', length, basesize);
 	}
+}
+
+/* Cooper debug info (dbgloc line markers, named local temps, .dbg sidecar) is
+ * emitted ONLY for a debug build (`CC65816_G` set by cc65816 under -g). A normal
+ * build must be byte-identical to a non-debug compiler — debug metadata must never
+ * perturb release codegen (it changes optimisation/regalloc decisions otherwise). */
+static int
+cooperDebug(void)
+{
+	static int v = -1;
+	if (v < 0) {
+		const char *e = getenv("CC65816_G");
+		v = (e && *e) ? 1 : 0;
+	}
+	return v;
 }
 
 /* Cooper -g: encode a C local's name + a short type code into its alloc temp
@@ -549,7 +565,7 @@ funcalloc(struct func *f, struct decl *d)
 		v = funcinst(f, IAND, ptrclass, v, mkintconst(-align));
 	}
 	d->value = v;
-	if (d->name && d->kind == DECLOBJECT) {
+	if (cooperDebug() && d->name && d->kind == DECLOBJECT) {
 		v->u.name = dbgTempName(d);
 		/* Aggregate locals: emit their type layout to the .dbg sidecar for
 		 * struct-field / array-element expansion in the debugger. */
