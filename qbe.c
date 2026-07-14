@@ -1038,33 +1038,24 @@ funcexpr(struct func *f, struct expr *e)
 		t = e->u.binary.l->type;
 		if (t->kind == TYPEPOINTER)
 			t = &typeulong;
-		/* Detect unsigned operands hidden by integer promotion casts.
-		 * On 65816, QBE 'w' is 16-bit but cproc models int as 32-bit.
-		 * u16 promotes to signed int, causing signed ops when unsigned
-		 * is correct. Look through EXPRCAST to find original types. */
-		int left_unsigned = 0, right_unsigned = 0;
-		if (t->prop & PROPINT && t->u.basic.issigned) {
-			struct expr *orig;
-			orig = e->u.binary.l;
-			while (orig->kind == EXPRCAST)
-				orig = orig->base;
-			if (orig->type->prop & PROPINT && !orig->type->u.basic.issigned)
-				left_unsigned = 1;
-			orig = e->u.binary.r;
-			while (orig->kind == EXPRCAST)
-				orig = orig->base;
-			if (orig->type->prop & PROPINT && !orig->type->u.basic.issigned)
-				right_unsigned = 1;
-		}
+		/* Signedness comes straight from the operand type. The
+		 * look-through-casts heuristic that used to live here dated
+		 * from the 32-bit-int era (u16 promoted to SIGNED int, so
+		 * unsigned ops had to be recovered from the pre-cast types).
+		 * Since chantier A1 int is 16-bit: u16 promotes to unsigned
+		 * int via typepromote, so the type system is already right —
+		 * and the heuristic had become a miscompile, turning an
+		 * EXPLICIT (s16) cast of an unsigned-derived value back into
+		 * an unsigned division (opensnes#114). */
 		switch (e->op) {
 		case TMUL:
 			op = IMUL;
 			break;
 		case TDIV:
-			op = !(t->prop & PROPINT) || (t->u.basic.issigned && !(left_unsigned || right_unsigned)) ? IDIV : IUDIV;
+			op = !(t->prop & PROPINT) || t->u.basic.issigned ? IDIV : IUDIV;
 			break;
 		case TMOD:
-			op = (t->u.basic.issigned && !(left_unsigned || right_unsigned)) ? IREM : IUREM;
+			op = t->u.basic.issigned ? IREM : IUREM;
 			break;
 		case TADD:
 			op = IADD;
@@ -1076,7 +1067,7 @@ funcexpr(struct func *f, struct expr *e)
 			op = ISHL;
 			break;
 		case TSHR:
-			op = (t->u.basic.issigned && !left_unsigned) ? ISAR : ISHR;
+			op = t->u.basic.issigned ? ISAR : ISHR;
 			break;
 		case TBOR:
 			op = IOR;
@@ -1089,27 +1080,27 @@ funcexpr(struct func *f, struct expr *e)
 			break;
 		case TLESS:
 			if (t->size <= 4)
-				op = t->prop & PROPFLOAT ? ICLTS : (t->u.basic.issigned && !(left_unsigned || right_unsigned)) ? ICSLTW : ICULTW;
+				op = t->prop & PROPFLOAT ? ICLTS : (t->u.basic.issigned) ? ICSLTW : ICULTW;
 			else
-				op = t->prop & PROPFLOAT ? ICLTD : (t->u.basic.issigned && !(left_unsigned || right_unsigned)) ? ICSLTL : ICULTL;
+				op = t->prop & PROPFLOAT ? ICLTD : (t->u.basic.issigned) ? ICSLTL : ICULTL;
 			break;
 		case TGREATER:
 			if (t->size <= 4)
-				op = t->prop & PROPFLOAT ? ICGTS : (t->u.basic.issigned && !(left_unsigned || right_unsigned)) ? ICSGTW : ICUGTW;
+				op = t->prop & PROPFLOAT ? ICGTS : (t->u.basic.issigned) ? ICSGTW : ICUGTW;
 			else
-				op = t->prop & PROPFLOAT ? ICGTD : (t->u.basic.issigned && !(left_unsigned || right_unsigned)) ? ICSGTL : ICUGTL;
+				op = t->prop & PROPFLOAT ? ICGTD : (t->u.basic.issigned) ? ICSGTL : ICUGTL;
 			break;
 		case TLEQ:
 			if (t->size <= 4)
-				op = t->prop & PROPFLOAT ? ICLES : (t->u.basic.issigned && !(left_unsigned || right_unsigned)) ? ICSLEW : ICULEW;
+				op = t->prop & PROPFLOAT ? ICLES : (t->u.basic.issigned) ? ICSLEW : ICULEW;
 			else
-				op = t->prop & PROPFLOAT ? ICLED : (t->u.basic.issigned && !(left_unsigned || right_unsigned)) ? ICSLEL : ICULEL;
+				op = t->prop & PROPFLOAT ? ICLED : (t->u.basic.issigned) ? ICSLEL : ICULEL;
 			break;
 		case TGEQ:
 			if (t->size <= 4)
-				op = t->prop & PROPFLOAT ? ICGES : (t->u.basic.issigned && !(left_unsigned || right_unsigned)) ? ICSGEW : ICUGEW;
+				op = t->prop & PROPFLOAT ? ICGES : (t->u.basic.issigned) ? ICSGEW : ICUGEW;
 			else
-				op = t->prop & PROPFLOAT ? ICGED : (t->u.basic.issigned && !(left_unsigned || right_unsigned)) ? ICSGEL : ICUGEL;
+				op = t->prop & PROPFLOAT ? ICGED : (t->u.basic.issigned) ? ICSGEL : ICUGEL;
 			break;
 		case TEQL:
 			if (t->size <= 4)
