@@ -53,8 +53,11 @@ struct qbetype {
 struct inst {
 	enum instkind kind;
 	int class;
-	int volat;     /* OpenSNES patch (chantier A2): volatile flag — when
-	                * this field is non-zero we emit the `volat` keyword
+	int volat;     /* OpenSNES patch (chantier A2 + #121): access-flag
+	                * BITFIELD — bit 0 (1) = volatile (`volat` keyword),
+	                * bit 1 (2) = const-target (`cst` keyword: the loaded
+	                * object is const-qualified = ROM = unknown bank, the
+	                * w65816 backend must use far addressing). When set
 	                * before the op so QBE's loadopt / promote / gcm
 	                * passes leave the access intact. Threaded through
 	                * funcload / funcstore from the C-level
@@ -296,7 +299,7 @@ funcdbgloc(struct func *f, int line)
  * variant when the C-level type carries QUALVOLATILE so QBE's
  * loadopt / promote / gcm passes keep their hands off the access. */
 static struct value *
-funcinst_volat(struct func *f, int op, int class, struct value *arg0, struct value *arg1)
+funcinst_flags(struct func *f, int op, int class, struct value *arg0, struct value *arg1, int flags)
 {
 	struct value *r;
 	struct inst **ptr_arr;
@@ -310,9 +313,15 @@ funcinst_volat(struct func *f, int op, int class, struct value *arg0, struct val
 	if (f->end->insts.len >= sizeof(struct inst *)) {
 		ptr_arr = f->end->insts.val;
 		count = f->end->insts.len / sizeof(struct inst *);
-		ptr_arr[count - 1]->volat = 1;
+		ptr_arr[count - 1]->volat = flags;
 	}
 	return r;
+}
+
+static struct value *
+funcinst_volat(struct func *f, int op, int class, struct value *arg0, struct value *arg1)
+{
+	return funcinst_flags(f, op, class, arg0, arg1, 1);
 }
 
 static struct value *
@@ -709,13 +718,14 @@ funcload(struct func *f, struct type *t, enum typequal tq, struct lvalue lval)
 		break;
 	}
 	qt = qbetype(t);
-	/* OpenSNES patch (chantier A2): the access is volatile if the
-	 * lvalue's qualifier carries QUALVOLATILE. The qualifier comes
-	 * from the C-level type/expr and threads through here so the
-	 * generated load instruction can be tagged for QBE. */
-	is_volat = (tq & QUALVOLATILE) ? 1 : 0;
+	/* OpenSNES patch (chantier A2 + #121): bit 0 = volatile
+	 * (QUALVOLATILE, pass protection); bit 1 = const-target
+	 * (QUALCONST: the object is ROM data whose linked bank is
+	 * unknown — the w65816 backend must read it with far
+	 * addressing instead of the bank-$00-implicit forms). */
+	is_volat = ((tq & QUALVOLATILE) ? 1 : 0) | ((tq & QUALCONST) ? 2 : 0);
 	if (is_volat)
-		v = funcinst_volat(f, qt.load, qt.base, lval.addr, NULL);
+		v = funcinst_flags(f, qt.load, qt.base, lval.addr, NULL, is_volat);
 	else
 		v = funcinst(f, qt.load, qt.base, lval.addr, NULL);
 	return funcbits(f, t, v, lval.bits);
@@ -1445,10 +1455,15 @@ emitinst(struct inst **instp, struct inst **instend)
 		fputs(" =", stdout);
 		emitclass(inst->class, inst->arg[1]);
 		putchar(' ');
-		if (inst->volat)
+		if (inst->volat & 1)
 			fputs("volat ", stdout);
+		if (inst->volat & 2)
+			fputs("cst ", stdout);
 	} else if (inst->volat) {
-		fputs("volat ", stdout);
+		if (inst->volat & 1)
+			fputs("volat ", stdout);
+		if (inst->volat & 2)
+			fputs("cst ", stdout);
 	}
 	fputs(instname[inst->kind], stdout);
 	putchar(' ');
