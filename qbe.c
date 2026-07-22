@@ -109,6 +109,9 @@ struct func {
 /* Use 'l' (long) class for pointers - standard QBE convention.
  * The w65816 backend treats 'l' as 16-bit since that's the pointer size. */
 static const int ptrclass = 'l';
+/* Must track mkpointertype() in type.c. Used to decide whether an operand
+ * of pointer arithmetic needs widening — see the IEXTUW guard below. */
+static const int ptrsize = 4;
 
 void
 switchcase(struct switchcases *cases, unsigned long long i, struct block *b)
@@ -364,7 +367,15 @@ convert(struct func *f, struct type *dst, struct type *src, struct value *l)
 			}
 		}
 	} else if (dst->prop & PROPINT) {
-		class = dst->size == 8 ? 'l' : 'w';
+		/* qbetype() is the single source of truth for the int->class
+		 * mapping. The old `dst->size == 8 ? 'l' : 'w'` assumed QBE's
+		 * native model where 'l' is 8 bytes; since chantier A1-followup
+		 * this target maps 4-byte integers to 'l' too, so converting to
+		 * `unsigned long` produced a 'w'-class value. The scaling
+		 * multiply in pointer arithmetic (`%x =l mul %i, 1`) then had a
+		 * 'w' operand — malformed IR that only worked because the
+		 * pointer-arithmetic path re-extended its RESULT (issue #132). */
+		class = qbetype(dst).base;
 		if (src->prop & PROPINT) {
 			if (dst->size <= src->size)
 				return l;
@@ -1129,13 +1140,45 @@ funcexpr(struct func *f, struct expr *e)
 		}
 		if (op == INONE)
 			fatal("internal error; unimplemented binary expression");
-		/* For pointer arithmetic, extend integer operand to 'l' type
-		 * since QBE requires add operands to match result type */
-		if (e->type->kind == TYPEPOINTER) {
-			if (e->u.binary.l->type->kind != TYPEPOINTER)
-				l = funcinst(f, IEXTUW, ptrclass, l, NULL);
-			if (e->u.binary.r->type->kind != TYPEPOINTER)
-				r = funcinst(f, IEXTUW, ptrclass, r, NULL);
+		/* QBE requires every operand of an instruction to have the
+		 * instruction's class. Widen the ones that do not.
+		 *
+		 * This used to be a pointer-arithmetic special case keyed on
+		 * the C type KIND (`kind != TYPEPOINTER` -> extend), which was
+		 * wrong in both directions:
+		 *
+		 *  - it extended values that were ALREADY of pointer class.
+		 *    IEXTUW means "zero-extend a 16-bit word to 32 bits", so
+		 *    on a 4-byte value it TRUNCATES. cproc types a struct
+		 *    member's address computation as `long`, not as a pointer,
+		 *    so `&tab[i].field` lost its bank byte and every `static
+		 *    const` array of structs was read from bank $00 (#132);
+		 *  - it did not extend the index feeding the scaling multiply
+		 *    (`%x =l mul %i, 1` with %i of class w), because that
+		 *    multiply is not itself pointer-typed. The malformed
+		 *    multiply happened to be repaired by the extension applied
+		 *    to its RESULT in the following add — so removing the
+		 *    over-extension alone broke `p[i]` through a parameter.
+		 *
+		 * Keying on the operand's CLASS fixes both: extend exactly the
+		 * operands that are narrower than the instruction, and leave
+		 * alone the ones that already match. */
+		{
+			int rescls = qbetype(e->type).base;
+			if (rescls == 'l') {
+				struct type *lt = e->u.binary.l->type;
+				struct type *rt = e->u.binary.r->type;
+				if (qbetype(lt).base == 'w')
+					l = funcinst(f, (lt->prop & PROPINT)
+					             && lt->u.basic.issigned
+					             ? IEXTSW : IEXTUW,
+					             ptrclass, l, NULL);
+				if (qbetype(rt).base == 'w')
+					r = funcinst(f, (rt->prop & PROPINT)
+					             && rt->u.basic.issigned
+					             ? IEXTSW : IEXTUW,
+					             ptrclass, r, NULL);
+			}
 		}
 		return funcinst(f, op, qbetype(e->type).base, l, r);
 	case EXPRCOND:
