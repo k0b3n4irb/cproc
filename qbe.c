@@ -1379,8 +1379,25 @@ emitname(struct value *v)
 	if (kind >= LEN(sigil) || !sigil[kind])
 		fatal("invalid value");
 	putchar(sigil[kind]);
-	if (kind == VALUE_GLOBAL && v->id)
+	if (kind == VALUE_GLOBAL && v->id) {
+		/* Anonymous local-linkage global (string literal, __func__, compound
+		 * literal, block-scope static): its id restarts at 0 every translation
+		 * unit, so the emitted label (e.g. string.15) collides across TUs at
+		 * link. Namespace it with a per-TU stem (CC65816_TU, set by the
+		 * cc65816 wrapper from the source filename) so it stays unique.
+		 * Exported globals (v->id == 0) skip this and are untouched. */
+		static const char *tu;
+		static int tu_read;
+		if (!tu_read) {
+			tu = getenv("CC65816_TU");
+			tu_read = 1;
+		}
 		fputs(".L", stdout);
+		if (tu && *tu) {
+			fputs(tu, stdout);
+			putchar('_');
+		}
+	}
 	if (v->u.name)
 		fputs(v->u.name, stdout);
 	if (v->id)
