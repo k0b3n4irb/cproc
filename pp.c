@@ -555,6 +555,7 @@ keyword(struct token *tok)
 		{"__asm",          T__ASM__},
 		{"__asm__",        T__ASM__},
 		{"__attribute__",  T__ATTRIBUTE__},
+		{"__far",          T__FAR},
 		{"__inline",       TINLINE},
 		{"__inline__",     TINLINE},
 		{"__signed",       TSIGNED},

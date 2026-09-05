@@ -71,6 +71,7 @@ enum tokenkind {
 	T_NORETURN,
 	T__ASM__,
 	T__ATTRIBUTE__,
+	T__FAR,        /* OpenSNES: bank-$7E RAM address space (chantier B2) */
 
 	/* punctuator */
 	TLBRACK,
@@ -145,7 +146,11 @@ enum typequal {
 	QUALCONST    = 1<<1,
 	QUALRESTRICT = 1<<2,
 	QUALVOLATILE = 1<<3,
-	QUALATOMIC   = 1<<4
+	QUALATOMIC   = 1<<4,
+	/* OpenSNES (chantier B2): the object lives in bank $7E WRAM, outside
+	 * the 8 KB bank-0 band; every access through this type takes the
+	 * bank-honouring (far) codegen path. Rides on the type like const. */
+	QUALFAR      = 1<<5
 };
 
 enum typekind {

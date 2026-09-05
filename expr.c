@@ -1298,6 +1298,18 @@ mkassignexpr(struct expr *l, struct expr *r)
 {
 	struct expr *e;
 
+	/* OpenSNES (chantier B2): plain assignment converts without the
+	 * qualifier check that initialisers and arguments get (exprassign),
+	 * which is tolerable for const but is the silent-failure button for
+	 * __far — a far pointer stored into a plain pointer is then deref'd
+	 * bank-blind. Refuse it here; an explicit cast remains available. */
+	if (l->type->kind == TYPEPOINTER && !(l->type->qual & QUALFAR)) {
+		enum typequal rq = QUALNONE;
+		if (r->type->kind == TYPEPOINTER || r->type->kind == TYPEARRAY)
+			rq = r->type->qual;
+		if (rq & QUALFAR)
+			error(&tok.loc, "assignment discards '__far' qualifier (cast explicitly only if the object really is in bank 0)");
+	}
 	e = mkexpr(EXPRASSIGN, l->type, NULL);
 	e->u.assign.l = l;
 	e->u.assign.r = exprconvert(r, l->type);

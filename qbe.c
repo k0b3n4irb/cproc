@@ -664,7 +664,9 @@ funcstore(struct func *f, struct type *t, enum typequal tq, struct lvalue lval, 
 	 * an NMI handshake, …) and must not be coalesced or eliminated
 	 * by QBE. The `volat` keyword on the emitted store instruction
 	 * tells loadopt / promote / gcm to skip the affected store. */
-	is_volat = (tq & QUALVOLATILE) ? 1 : 0;
+	/* Bit 2 (chantier B2): far-RAM target — the backend must store with
+	 * bank-honouring addressing (see funcload for the bit layout). */
+	is_volat = ((tq & QUALVOLATILE) ? 1 : 0) | ((tq & QUALFAR) ? 4 : 0);
 	if (tq & QUALCONST)
 		error(&tok.loc, "cannot store to 'const' object");
 	tp = t->prop;
@@ -698,14 +700,14 @@ funcstore(struct func *f, struct type *t, enum typequal tq, struct lvalue lval, 
 			v = funcinst(f, IOR, qt.base, v,
 				funcinst(f, IAND, qt.base,
 					(is_volat
-					 ? funcinst_volat(f, qt.load, qt.base, lval.addr, NULL)
+					 ? funcinst_flags(f, qt.load, qt.base, lval.addr, NULL, is_volat)
 					 : funcinst(f, qt.load, qt.base, lval.addr, NULL)),
 					mkintconst(~mask)
 				)
 			);
 		}
 		if (is_volat)
-			funcinst_volat(f, qt.store, 0, v, lval.addr);
+			funcinst_flags(f, qt.store, 0, v, lval.addr, is_volat);
 		else
 			funcinst(f, qt.store, 0, v, lval.addr);
 		break;
@@ -734,7 +736,10 @@ funcload(struct func *f, struct type *t, enum typequal tq, struct lvalue lval)
 	 * (QUALCONST: the object is ROM data whose linked bank is
 	 * unknown — the w65816 backend must read it with far
 	 * addressing instead of the bank-$00-implicit forms). */
-	is_volat = ((tq & QUALVOLATILE) ? 1 : 0) | ((tq & QUALCONST) ? 2 : 0);
+	/* Bit 2 (chantier B2): far-RAM object (QUALFAR) — same far path as
+	 * const, but the object is writable bank-$7E WRAM. */
+	is_volat = ((tq & QUALVOLATILE) ? 1 : 0) | ((tq & QUALCONST) ? 2 : 0)
+	         | ((tq & QUALFAR) ? 4 : 0);
 	if (is_volat)
 		v = funcinst_flags(f, qt.load, qt.base, lval.addr, NULL, is_volat);
 	else
@@ -1519,11 +1524,15 @@ emitinst(struct inst **instp, struct inst **instend)
 			fputs("volat ", stdout);
 		if (inst->volat & 2)
 			fputs("cst ", stdout);
+		if (inst->volat & 4)
+			fputs("farram ", stdout);
 	} else if (inst->volat) {
 		if (inst->volat & 1)
 			fputs("volat ", stdout);
 		if (inst->volat & 2)
 			fputs("cst ", stdout);
+		if (inst->volat & 4)
+			fputs("farram ", stdout);
 	}
 	fputs(instname[inst->kind], stdout);
 	putchar(' ');
@@ -1726,6 +1735,20 @@ dataitem(struct expr *expr, unsigned long long size)
 	}
 }
 
+/* The qualifiers that apply to the object a declaration names: its own
+ * (d->qual) plus, for an array, the element qualifiers held on the array
+ * type(s). See emitdata for why a pointer type's qual is excluded. */
+static enum typequal
+objqual(struct decl *d)
+{
+	enum typequal q = d->qual;
+	struct type *t;
+
+	for (t = d->type; t && t->kind == TYPEARRAY; t = t->base)
+		q |= t->qual;
+	return q;
+}
+
 void
 emitdata(struct decl *d, struct init *init)
 {
@@ -1743,13 +1766,21 @@ emitdata(struct decl *d, struct init *init)
 	if (d->linkage == LINKEXTERN)
 		fputs("export ", stdout);
 	/* Emit section ".rodata" for const-qualified data so the backend
-	 * keeps it in ROM instead of copying to RAM at startup.
-	 * Check both the declaration qualifier and the type qualifier
-	 * (for arrays, const is on the element type). */
-	if ((d->qual & QUALCONST) ||
-	    (d->type && d->type->qual & QUALCONST) ||
-	    (d->type && d->type->base && d->type->base->qual & QUALCONST))
-		fputs("section \".rodata\" ", stdout);
+	 * keeps it in ROM instead of copying to RAM at startup, and (OpenSNES
+	 * chantier B2) section ".far" for __far objects so it places them in
+	 * bank $7E. The qualifiers that make the OBJECT const/far are its own
+	 * (d->qual — a scalar, or a `* const` / `* __far` pointer object) and,
+	 * for arrays, the element qualifiers, which declarator() stores on the
+	 * array type's `qual` (nested arrays: on the innermost one). A pointer
+	 * type's `qual` is its POINTEE's and must not be consulted: it used to
+	 * be, which sectioned `const u8 *p = tbl;` (a mutable pointer) into ROM. */
+	{
+		enum typequal oq = objqual(d);
+		if (oq & QUALCONST)
+			fputs("section \".rodata\" ", stdout);
+		else if (oq & QUALFAR)
+			fputs("section \".far\" ", stdout);
+	}
 	fputs("data ", stdout);
 	emitname(d->value);
 	printf(" = align %d { ", align);

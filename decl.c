@@ -118,6 +118,7 @@ typequal(enum typequal *tq)
 	case TCONST:    *tq |= QUALCONST;    break;
 	case TVOLATILE: *tq |= QUALVOLATILE; break;
 	case TRESTRICT: *tq |= QUALRESTRICT; break;
+	case T__FAR:    *tq |= QUALFAR;      break;  /* OpenSNES B2 */
 	case T_ATOMIC: error(&tok.loc, "_Atomic type qualifier is not yet supported");
 	default: return 0;
 	}
@@ -1051,6 +1052,23 @@ decl(struct scope *s, struct func *f)
 			d = declcommon(s, kind, name, asmname, t, tq, sc, prior);
 			if (d->u.obj.align < align)
 				d->u.obj.align = align;
+			/* OpenSNES (chantier B2): a __far object is placed in bank
+			 * $7E by the backend, so it needs static storage (the stack
+			 * is bank 0) and cannot also be const (ROM is already far). */
+			{
+				/* the object's own qualifiers plus an array's element ones (held
+				 * on the array type); a pointer type's qual is its pointee's */
+				enum typequal oq = tq;
+				struct type *at;
+				for (at = t; at && at->kind == TYPEARRAY; at = at->base)
+					oq |= at->qual;
+				if (oq & QUALFAR) {
+					if (d->linkage == LINKNONE && !(sc & SCSTATIC))
+						error(&tok.loc, "__far object '%s' must have static storage duration (the stack is bank 0)", name);
+					if (oq & QUALCONST)
+						error(&tok.loc, "object '%s' cannot be both __far and const (const data already lives in ROM, any bank)", name);
+				}
+			}
 			if (d->linkage == LINKNONE && !(sc & SCSTATIC)) {
 				d->u.obj.storage = SDAUTO;
 			} else {
