@@ -214,8 +214,18 @@ exprassign(struct expr *e, struct type *t)
 			error(&tok.loc, "assignment to pointer must be from pointer or null pointer constant");
 		if (t->base != &typevoid && et->base != &typevoid && !typecompatible(t->base, et->base))
 			error(&tok.loc, "base types of pointer assignment must be compatible or void");
-		if ((et->qual & t->qual) != et->qual)
-			error(&tok.loc, "assignment to pointer discards qualifiers");
+		/* OpenSNES (chantier B2): a `const` target satisfies `__far` —
+		 * since #121 every read through a const-qualified pointee is a
+		 * far read (the backend takes the bank from the pointer), so a
+		 * `T __far *` converts to `const T *` without losing the bank.
+		 * Every other dropped qualifier is still an error. */
+		{
+			enum typequal need = et->qual;
+			if ((need & QUALFAR) && (t->qual & QUALCONST))
+				need &= ~QUALFAR;
+			if ((need & t->qual) != need)
+				error(&tok.loc, "assignment to pointer discards qualifiers");
+		}
 		break;
 	case TYPENULLPTR:
 		if (!nullpointer(e))
@@ -1302,8 +1312,9 @@ mkassignexpr(struct expr *l, struct expr *r)
 	 * qualifier check that initialisers and arguments get (exprassign),
 	 * which is tolerable for const but is the silent-failure button for
 	 * __far — a far pointer stored into a plain pointer is then deref'd
-	 * bank-blind. Refuse it here; an explicit cast remains available. */
-	if (l->type->kind == TYPEPOINTER && !(l->type->qual & QUALFAR)) {
+	 * bank-blind. Refuse it here; an explicit cast remains available. A
+	 * `const T *` target is fine — its derefs are far reads (#121). */
+	if (l->type->kind == TYPEPOINTER && !(l->type->qual & (QUALFAR | QUALCONST))) {
 		enum typequal rq = QUALNONE;
 		if (r->type->kind == TYPEPOINTER || r->type->kind == TYPEARRAY)
 			rq = r->type->qual;
