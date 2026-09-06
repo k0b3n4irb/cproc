@@ -715,6 +715,23 @@ funcstore(struct func *f, struct type *t, enum typequal tq, struct lvalue lval, 
 	return r;
 }
 
+/* OpenSNES (chantier B2): the qualifiers that govern an ACCESS to the
+ * object expression e. e->qual carries the object's own qualifiers; for
+ * a pointer-typed expression e->type->qual is the POINTEE's (cproc keeps
+ * a pointer's pointee qualifiers on the pointer type), which must not
+ * taint a load/store of the pointer variable itself — a `T __far *p`
+ * global is a bank-0 object, only `*p` is a far access. Array element
+ * qualifiers are folded the same way (an array expression decays; the
+ * element access is a deref and picks its own qualifiers up there). */
+static enum typequal
+accessqual(struct expr *e)
+{
+	enum typequal tq = e->qual;
+	if (e->type->kind != TYPEPOINTER && e->type->kind != TYPEARRAY)
+		tq |= e->type->qual;
+	return tq;
+}
+
 static struct value *
 funcload(struct func *f, struct type *t, enum typequal tq, struct lvalue lval)
 {
@@ -960,7 +977,7 @@ funcexpr(struct func *f, struct expr *e)
 	case EXPRIDENT:
 		d = e->u.ident.decl;
 		switch (d->kind) {
-		case DECLOBJECT: return funcload(f, e->type, e->qual | e->type->qual, (struct lvalue){d->value});
+		case DECLOBJECT: return funcload(f, e->type, accessqual(e), (struct lvalue){d->value});
 		case DECLCONST:  return d->value;
 		default:
 			fatal("unimplemented declaration kind %d", d->kind);
@@ -975,10 +992,10 @@ funcexpr(struct func *f, struct expr *e)
 	case EXPRBITFIELD:
 	case EXPRCOMPOUND:
 		lval = funclval(f, e);
-		return funcload(f, e->type, e->qual | e->type->qual, lval);
+		return funcload(f, e->type, accessqual(e), lval);
 	case EXPRINCDEC:
 		lval = funclval(f, e->base);
-		l = funcload(f, e->base->type, e->base->qual | e->base->type->qual, lval);
+		l = funcload(f, e->base->type, accessqual(e->base), lval);
 		t = e->type;
 		if (t->kind == TYPEPOINTER) {
 			r = mkintconst(t->base->size);
@@ -1023,7 +1040,7 @@ funcexpr(struct func *f, struct expr *e)
 			return lval.addr;
 		case TMUL:
 			r = funcexpr(f, e->base);
-			return funcload(f, e->type, e->qual | e->type->qual, (struct lvalue){r});
+			return funcload(f, e->type, accessqual(e), (struct lvalue){r});
 		case TSUB:
 			r = funcexpr(f, e->base);
 			return funcinst(f, INEG, qbetype(e->type).base, r, NULL);
