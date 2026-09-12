@@ -92,7 +92,9 @@ arrayadd(struct array *a, size_t n)
 {
 	void *v;
 
-	if (a->cap - a->len < n) {
+	/* also allocate on a zero-length add to an empty array, so the
+	   returned pointer is never NULL + 0 (UBSan pointer-overflow) */
+	if (a->cap - a->len < n || !a->val) {
 		do a->cap = a->cap ? a->cap * 2 : 256;
 		while (a->cap - a->len < n);
 		a->val = realloc(a->val, a->cap);

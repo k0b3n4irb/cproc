@@ -1675,7 +1675,11 @@ emitfunc(struct func *f, bool global)
 			emitvalue(b->phi.val[1]);
 			putchar('\n');
 		}
-		instend = (struct inst **)((char *)b->insts.val + b->insts.len);
+		/* an empty block has val == NULL; NULL + 0 is a UBSan
+		   pointer-overflow report on clang < 19 */
+		instend = b->insts.val;
+		if (b->insts.len)
+			instend = (struct inst **)((char *)b->insts.val + b->insts.len);
 		for (inst = b->insts.val; inst != instend;)
 			inst = emitinst(inst, instend);
 		emitjump(&b->jump);
