@@ -109,9 +109,8 @@ struct func {
 /* Use 'l' (long) class for pointers - standard QBE convention.
  * The w65816 backend treats 'l' as 16-bit since that's the pointer size. */
 static const int ptrclass = 'l';
-/* Must track mkpointertype() in type.c. Used to decide whether an operand
- * of pointer arithmetic needs widening — see the IEXTUW guard below. */
-static const int ptrsize = 4;
+/* Pointer size is 4 (mkpointertype() in type.c); the `case 4:` widening
+ * guard in convert() below tracks it. */
 
 void
 switchcase(struct switchcases *cases, unsigned long long i, struct block *b)
@@ -195,9 +194,8 @@ qbetype(struct type *t)
 	static const struct qbetype
 		ub = {'w', 'b', ILOADUB, ISTOREB},
 		sb = {'w', 'b', ILOADSB, ISTOREB},
-		uh = {'w', 'h', ILOADUH, ISTOREH},
-		sh = {'w', 'h', ILOADSH, ISTOREH},
-		/* w65816: 2-byte int uses 'w' class for ops, 'h' for data (halfword = 2 bytes) */
+		/* w65816: 2-byte int uses 'w' class for ops, 'h' for data (halfword =
+		 * 2 bytes); the upstream uh/sh halfword entries are unused here. */
 		wh = {'w', 'h', ILOADW, ISTOREW},
 		l = {'l', 'l', ILOADL, ISTOREL},
 		s = {'s', 's', ILOADS, ISTORES},
@@ -319,12 +317,6 @@ funcinst_flags(struct func *f, int op, int class, struct value *arg0, struct val
 		ptr_arr[count - 1]->volat = flags;
 	}
 	return r;
-}
-
-static struct value *
-funcinst_volat(struct func *f, int op, int class, struct value *arg0, struct value *arg1)
-{
-	return funcinst_flags(f, op, class, arg0, arg1, 1);
 }
 
 static struct value *
