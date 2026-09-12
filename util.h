@@ -37,7 +37,9 @@ void *arrayadd(struct array *, size_t);
 void arrayaddptr(struct array *, void *);
 void arrayaddbuf(struct array *, const void *, size_t);
 void *arraylast(struct array *, size_t);
-#define arrayforeach(a, m) for (m = (a)->val; m != (void *)((char *)(a)->val + (a)->len); ++m)
+/* the end pointer is only formed for a non-empty array: NULL + 0 is a
+   UBSan pointer-overflow report on clang < 19 */
+#define arrayforeach(a, m) for (m = (a)->val; m && m != (void *)((char *)(a)->val + (a)->len); ++m)
 
 /* map */
 
