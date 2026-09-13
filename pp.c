@@ -526,7 +526,10 @@ expandfunc(struct macro *m)
 		error(&t->loc, "too many arguments for macro '%s'", m->name);
 	for (i = 0, t = tok.val; i < m->nparam; ++i) {
 		arg[i].token = t;
-		t += arg[i].ntoken;
+		/* tok.val is NULL when no token was collected; NULL + 0 is a
+		   UBSan pointer-overflow report on clang < 19 */
+		if (arg[i].ntoken)
+			t += arg[i].ntoken;
 	}
 	m->arg = arg;
 }
