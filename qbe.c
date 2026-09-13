@@ -594,15 +594,34 @@ funcalloc(struct func *f, struct decl *d)
 	f->end = end;
 }
 
+/* w65816: a comparison is emitted in the IR class of its operands. Floats
+ * keep the upstream size rule (4 bytes = single); integers of class 'l'
+ * (long, 4 bytes on this target) take the 'l' compare — the upstream
+ * `size <= 4` test picked csltw for two longs and the backend compared the
+ * low words only (c_features ROM, 2026-09-13). */
+static int
+cmpnarrow(struct type *t)
+{
+	if (t->prop & PROPFLOAT)
+		return t->size <= 4;
+	return qbetype(t).base == 'w';
+}
+
 static struct value *
 funcbits(struct func *f, struct type *t, struct value *v, struct bitfield b)
 {
 	int class, bits;
 
-	class = t->size <= 4 ? 'w' : 'l';
+	/* w65816: the IR class of the container decides the register width
+	 * the field is extracted from — 'w' is 16 bits here, not 32, so the
+	 * pad is to the class width, not to a 4-byte word. The upstream
+	 * `(size + 3) & ~3` shifted a u16 container's field clean out of the
+	 * register (every read of a 3-bit field came back 0; c_features ROM,
+	 * 2026-09-13). */
+	class = qbetype(t).base;
 	bits = b.after;
 	if (bits) {
-		bits += (((t->size + 3) & ~3) - t->size) << 3;
+		bits += ((class == 'w' ? 2 : 4) - t->size) << 3;
 		v = funcinst(f, ISHL, class, v, mkintconst(bits));
 	}
 	bits += b.before;
@@ -1114,37 +1133,37 @@ funcexpr(struct func *f, struct expr *e)
 			op = IXOR;
 			break;
 		case TLESS:
-			if (t->size <= 4)
+			if (cmpnarrow(t))
 				op = t->prop & PROPFLOAT ? ICLTS : (t->u.basic.issigned) ? ICSLTW : ICULTW;
 			else
 				op = t->prop & PROPFLOAT ? ICLTD : (t->u.basic.issigned) ? ICSLTL : ICULTL;
 			break;
 		case TGREATER:
-			if (t->size <= 4)
+			if (cmpnarrow(t))
 				op = t->prop & PROPFLOAT ? ICGTS : (t->u.basic.issigned) ? ICSGTW : ICUGTW;
 			else
 				op = t->prop & PROPFLOAT ? ICGTD : (t->u.basic.issigned) ? ICSGTL : ICUGTL;
 			break;
 		case TLEQ:
-			if (t->size <= 4)
+			if (cmpnarrow(t))
 				op = t->prop & PROPFLOAT ? ICLES : (t->u.basic.issigned) ? ICSLEW : ICULEW;
 			else
 				op = t->prop & PROPFLOAT ? ICLED : (t->u.basic.issigned) ? ICSLEL : ICULEL;
 			break;
 		case TGEQ:
-			if (t->size <= 4)
+			if (cmpnarrow(t))
 				op = t->prop & PROPFLOAT ? ICGES : (t->u.basic.issigned) ? ICSGEW : ICUGEW;
 			else
 				op = t->prop & PROPFLOAT ? ICGED : (t->u.basic.issigned) ? ICSGEL : ICUGEL;
 			break;
 		case TEQL:
-			if (t->size <= 4)
+			if (cmpnarrow(t))
 				op = t->prop & PROPFLOAT ? ICEQS : ICEQW;
 			else
 				op = t->prop & PROPFLOAT ? ICEQD : ICEQL;
 			break;
 		case TNEQ:
-			if (t->size <= 4)
+			if (cmpnarrow(t))
 				op = t->prop & PROPFLOAT ? ICNES : ICNEW;
 			else
 				op = t->prop & PROPFLOAT ? ICNED : ICNEL;
