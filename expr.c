@@ -721,7 +721,7 @@ primaryexpr(struct scope *s)
 			error(&tok.loc, "character constant escape is out of range");
 		val = chr;
 		if (ordinary) {
-			if (typechar.u.arith.issigned)
+			if (typechar.u.basic.issigned)
 				val = (val ^ 0x80) - 0x80;
 			t = &typeint;
 		}
