@@ -72,6 +72,7 @@ enum tokenkind {
 	T__ASM__,
 	T__ATTRIBUTE__,
 	T__FAR,        /* OpenSNES: bank-$7E RAM address space (chantier B2) */
+	T__RAMCODE,    /* OpenSNES: function linked in the RAM code window */
 
 	/* punctuator */
 	TLBRACK,
@@ -297,6 +298,10 @@ struct decl {
 			 * `inline` linkage hint; qbe/inline.c uses it as the
 			 * eligibility gate. */
 			bool hasinlinekw;
+			/* OpenSNES: `__ramcode` on any declaration of the function —
+			 * emitted in section ".ram_code" (the RAM code window,
+			 * RAM_CODE_SIZE), copied to WRAM at boot. */
+			bool ramcode;
 		} func;
 		unsigned long long enumconst;
 		enum builtinkind builtin;

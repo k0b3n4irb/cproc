@@ -68,6 +68,7 @@ const char *tokstr[] = {
 	[T__ASM__] = "__asm__",
 	[T__ATTRIBUTE__] = "__attribute__",
 	[T__FAR] = "__far",
+	[T__RAMCODE] = "__ramcode",
 
 	/* punctuator */
 	[TLBRACK] = "[",

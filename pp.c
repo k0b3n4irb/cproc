@@ -561,6 +561,7 @@ keyword(struct token *tok)
 		{"__far",          T__FAR},
 		{"__inline",       TINLINE},
 		{"__inline__",     TINLINE},
+		{"__ramcode",      T__RAMCODE},
 		{"__signed",       TSIGNED},
 		{"__signed__",     TSIGNED},
 		{"__thread",       TTHREAD_LOCAL},

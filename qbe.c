@@ -1658,6 +1658,10 @@ emitfunc(struct func *f, bool global)
 	 * have a target. */
 	if (f->decl->u.func.hasinlinekw)
 		fputs("inline ", stdout);
+	/* OpenSNES: a __ramcode function goes to the RAM code window; the
+	 * w65816 backend turns the section into an APPENDTO ".ram_code". */
+	if (f->decl->u.func.ramcode)
+		fputs("section \".ram_code\" ", stdout);
 	fputs("function ", stdout);
 	if (f->type->base != &typevoid) {
 		emitclass(qbetype(f->type->base).base, f->type->base->value);

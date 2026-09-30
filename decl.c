@@ -51,6 +51,7 @@ enum funcspec {
 
 	FUNCINLINE   = 1<<1,
 	FUNCNORETURN = 1<<2,
+	FUNCRAMCODE  = 1<<3,  /* OpenSNES: __ramcode */
 };
 
 struct structbuilder {
@@ -136,6 +137,7 @@ funcspec(enum funcspec *fs)
 	switch (tok.kind) {
 	case TINLINE:    new = FUNCINLINE;   break;
 	case T_NORETURN: new = FUNCNORETURN; break;
+	case T__RAMCODE: new = FUNCRAMCODE;  break;
 	default: return 0;
 	}
 	if (!fs)
@@ -1047,6 +1049,8 @@ decl(struct scope *s, struct func *f)
 				error(&tok.loc, "typedef '%s' redefined with different type", name);
 			break;
 		case DECLOBJECT:
+			if (fs & FUNCRAMCODE)
+				error(&tok.loc, "'__ramcode' applies to functions; '%s' is an object", name);
 			if (align && align < t->align)
 				error(&tok.loc, "object '%s' requires alignment %d, which is stricter than specified alignment %d", name, t->align, align);
 			d = declcommon(s, kind, name, asmname, t, tq, sc, prior);
@@ -1111,6 +1115,8 @@ decl(struct scope *s, struct func *f)
 			d->u.func.inlinedefn = d->linkage == LINKEXTERN && fs & FUNCINLINE && !(sc & SCEXTERN) && (!prior || prior->u.func.inlinedefn);
 			d->u.func.isnoreturn = fs & FUNCNORETURN;
 			d->u.func.hasinlinekw = (fs & FUNCINLINE) != 0;
+			if (fs & FUNCRAMCODE)
+				d->u.func.ramcode = true;
 			if (tok.kind == TLBRACE) {
 				if (!allowfunc)
 					error(&tok.loc, "function definition not allowed");
