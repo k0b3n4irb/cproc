@@ -1047,6 +1047,11 @@ postfixexpr(struct scope *s, struct expr *r)
 			r->lvalue = lvalue;
 			if (m->bits.before || m->bits.after) {
 				e = mkexpr(EXPRBITFIELD, r->type, r);
+				/* OpenSNES (2026-10-03): the bit-field node carries the
+				 * object's qualifiers like the plain member does, so a
+				 * FAR or const-in-ROM bit-field is read with its bank
+				 * and a volatile one is not coalesced. */
+				e->qual = r->qual;
 				e->lvalue = lvalue;
 				e->u.bitfield.bits = m->bits;
 			} else {

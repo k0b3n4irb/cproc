@@ -298,6 +298,12 @@ stmt(struct func *f, struct scope *s)
 	case TRETURN:
 		next();
 		t = functype(f);
+		/* OpenSNES (2026-10-03): the w65816 backend has no lowering for an
+		 * aggregate returned by value; the copy that used to make the
+		 * front end emit halfword ops (refused) is a plain word copy now,
+		 * and the call site reads zeros. Refuse here instead. */
+		if (t->base->kind == TYPESTRUCT || t->base->kind == TYPEUNION)
+			error(&tok.loc, "struct returns by value are not supported on w65816; return through a pointer argument");
 		if (t->base != &typevoid) {
 			e = exprassign(expr(s), t->base);
 			v = funcexpr(f, e);

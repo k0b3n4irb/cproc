@@ -639,12 +639,17 @@ funccopy(struct func *f, struct value *dst, struct value *src, unsigned long lon
 	unsigned long long off;
 
 	assert((align & (align - 1)) == 0);
+	/* OpenSNES (2026-10-03): on w65816 `w` is 2 bytes and `l` 4, so a
+	 * 2-aligned chunk is a word and a 4-aligned one a long. Upstream's
+	 * table (2 = halfword, 4 = word, 8 = long) copied half of every
+	 * 4-aligned struct — `gb = ga` with a u32 field kept two of its four
+	 * bytes — and the halfword ops it emitted for 2-aligned structs were
+	 * what the backend refused as "struct assignment not supported". */
 	class = 'w';
 	switch (align) {
 	case 1: load = ILOADUB, store = ISTOREB; break;
-	case 2: load = ILOADUH, store = ISTOREH; break;
-	case 4: load = ILOADW, store = ISTOREW; break;
-	default: load = ILOADL, store = ISTOREL, align = 8, class = 'l'; break;
+	case 2: load = ILOADW, store = ISTOREW; break;
+	default: load = ILOADL, store = ISTOREL, align = 4, class = 'l'; break;
 	}
 	inc = mkintconst(align);
 	off = 0;
@@ -1019,9 +1024,18 @@ funcexpr(struct func *f, struct expr *e)
 			return NULL;  /* unreachable */
 		}
 		v = funcinst(f, e->op == TINC ? IADD : ISUB, qbetype(t).base, l, r);
-		v = funcstore(f, e->type, e->qual, lval, v);
+		/* OpenSNES (2026-10-03): the store carries the qualifiers of the
+		 * object, like the load above — e->qual is the qualifier of the
+		 * incdec expression itself, which is empty. With it, `far++`
+		 * read bank $7E and wrote bank $00, and `reg++` on a volatile
+		 * stored without `volat`. */
+		v = funcstore(f, e->type, accessqual(e->base), lval, v);
 		return e->u.incdec.post ? l : v;
 	case EXPRCALL:
+		/* OpenSNES (2026-10-03): see stmt.c, TRETURN — a callee declared
+		 * elsewhere is caught at the call. */
+		if (e->type->kind == TYPESTRUCT || e->type->kind == TYPEUNION)
+			error(&tok.loc, "struct returns by value are not supported on w65816; return through a pointer argument");
 		argvals = xreallocarray(NULL, e->u.call.nargs, sizeof(argvals[0]));
 		for (arg = e->u.call.args, i = 0; arg; arg = arg->next, ++i) {
 			emittype(arg->type);
@@ -1238,6 +1252,19 @@ funcexpr(struct func *f, struct expr *e)
 		b[2]->phi.class = qbetype(e->type).base;
 		return &b[2]->phi.res;
 	case EXPRASSIGN:
+		/* OpenSNES (2026-10-03): a whole-object copy goes through funccopy,
+		 * whose loads and stores carry no bank: refuse it when either side
+		 * is FAR instead of copying from or to bank $00. */
+		switch (e->u.assign.l->type->kind) {
+		case TYPESTRUCT:
+		case TYPEUNION:
+		case TYPEARRAY:
+			if ((accessqual(e->u.assign.l) | accessqual(e->u.assign.r)) & QUALFAR)
+				error(&tok.loc, "whole-object copy of a FAR struct or array is not supported; copy field by field");
+			break;
+		default:
+			break;
+		}
 		r = funcexpr(f, e->u.assign.r);
 		if (e->u.assign.l->kind == EXPRTEMP) {
 			e->u.assign.l->u.temp = r;
@@ -1294,15 +1321,20 @@ funcexpr(struct func *f, struct expr *e)
 static void
 zero(struct func *func, struct value *addr, int align, unsigned long long offset, unsigned long long end)
 {
+	/* OpenSNES (2026-10-03): w = 2 bytes, l = 4 on w65816 (see funccopy);
+	 * upstream's table left the upper half of every 4-aligned object
+	 * unwritten (`u32 a[4] = {0}` read stack residue). */
 	static const enum instkind store[] = {
 		[1] = ISTOREB,
-		[2] = ISTOREH,
-		[4] = ISTOREW,
-		[8] = ISTOREL,
+		[2] = ISTOREW,
+		[4] = ISTOREL,
 	};
 	static struct value z = {.kind = VALUE_INTCONST};
 	struct value *tmp;
 	int a = 1;
+
+	if (align > 4)
+		align = 4;
 
 	while (offset < end) {
 		if ((align - (offset & (align - 1))) & a) {
