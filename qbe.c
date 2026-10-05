@@ -20,6 +20,7 @@ struct value {
 		VALUE_LABEL,
 
 		VALUE_THREAD = 1<<4,
+		VALUE_STATIC = 1<<5,  /* file-scope static: emitted as name.<TU> so two sources may share a name */
 	} kind;
 	unsigned id;
 	union {
@@ -159,6 +160,8 @@ mkglobal(struct decl *d)
 	} else {
 		v->u.name = d->name;
 		v->id = d->linkage == LINKNONE ? ++id : 0;
+		if (d->linkage == LINKINTERN)
+			v->kind |= VALUE_STATIC;
 	}
 
 	return v;
@@ -1440,23 +1443,36 @@ emitname(struct value *v)
 	};
 	int kind;
 
+	/* The per-TU stem: CC65816_TU, set by the cc65816 wrapper from the source
+	 * filename (main.c -> "main"). Labels are global to the whole link in
+	 * WLA-DX, so every symbol that C scopes to one translation unit carries
+	 * it, or two sources could not share a name. */
+	static const char *tu;
+	static int tu_read;
+	if (!tu_read) {
+		tu = getenv("CC65816_TU");
+		tu_read = 1;
+	}
 	kind = v->kind & 0xf;
 	if (kind >= LEN(sigil) || !sigil[kind])
 		fatal("invalid value");
 	putchar(sigil[kind]);
+	if (kind == VALUE_GLOBAL && (v->kind & VALUE_STATIC)) {
+		/* File-scope static (object or function): keeps its readable name in
+		 * the .sym, suffixed with the TU — `itable.main`. Until 2026-10-05 it
+		 * was emitted bare and two sources defining the same static failed
+		 * at link ("Label ... was defined more than once"). */
+		fputs(v->u.name, stdout);
+		if (tu && *tu)
+			printf(".%s", tu);
+		return;
+	}
 	if (kind == VALUE_GLOBAL && v->id) {
 		/* Anonymous local-linkage global (string literal, __func__, compound
 		 * literal, block-scope static): its id restarts at 0 every translation
 		 * unit, so the emitted label (e.g. string.15) collides across TUs at
-		 * link. Namespace it with a per-TU stem (CC65816_TU, set by the
-		 * cc65816 wrapper from the source filename) so it stays unique.
+		 * link. Namespace it with the per-TU stem so it stays unique.
 		 * Exported globals (v->id == 0) skip this and are untouched. */
-		static const char *tu;
-		static int tu_read;
-		if (!tu_read) {
-			tu = getenv("CC65816_TU");
-			tu_read = 1;
-		}
 		fputs(".L", stdout);
 		if (tu && *tu) {
 			fputs(tu, stdout);
