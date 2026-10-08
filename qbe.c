@@ -225,8 +225,22 @@ qbetype(struct type *t)
 	 * Oneg/Oshl/Oshr/Osar/Omul/Odiv/Orem/Ocmp*l/Oextsw/Oextuw all live in
 	 * the backend (Sessions 2-6 of the chantier), but only fired for
 	 * pointers until this flip. */
+	/* A floating type keeps its class: the w65816 backend refuses what is
+	 * left of it after constant folding (emitfn), so `(int)(1.5 * 256)`
+	 * still compiles and `a * 2.5f` does not. */
 	case 4: return t->prop & PROPFLOAT ? s : (struct qbetype){'l', 'l', ILOADL, ISTOREL};
-	case 8: return t->prop & PROPFLOAT ? d : l;
+	/* w65816: no 64-bit integer. Until 2026-10-08 `long long` (8 bytes,
+	 * per C99) took class 'l', which is 32 bits here: a + 1 dropped the
+	 * upper half, a * b called the 32-bit multiply, without a word — and
+	 * QBE folds a 64-bit constant expression at 32 bits. Refused wherever
+	 * a value of that type reaches code generation; sizeof, and constants
+	 * the front end folds itself (initialisers, enums, array sizes, case
+	 * labels), never come through here. */
+	case 8:
+		if (t->prop & PROPFLOAT)
+			return d;
+		error(&tok.loc, "64-bit integers (long long) are not supported on w65816: the widest integer is long, 32 bits");
+		return v;  /* not reached */
 	case 16: fatal("long double is not yet supported");
 	}
 	assert(0);
@@ -1016,6 +1030,17 @@ funcexpr(struct func *f, struct expr *e)
 	size_t i;
 
 	calcvla(f, e->type);
+	/* w65816: a value of a 64-bit type is refused (qbetype), but a constant
+	 * of that type is everyday C: `-2147483648` is the negation of a long
+	 * long, `4294967295` is one, and so is `(1ULL << 40) >> 36`. Fold those
+	 * here, in 64 bits, so that only a 64-bit value computed at run time
+	 * reaches the refusal. */
+	if (e->kind != EXPRCONST && e->type && e->type->prop & PROPINT && e->type->size == 8) {
+		struct expr *c = eval(e);
+
+		if (c->kind == EXPRCONST)
+			return mkintconst(c->u.constant.u);
+	}
 	switch (e->kind) {
 	case EXPRIDENT:
 		d = e->u.ident.decl;
