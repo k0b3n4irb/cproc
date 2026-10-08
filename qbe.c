@@ -345,7 +345,13 @@ convert(struct func *f, struct type *dst, struct type *src, struct value *l)
 			switch (src->size) {
 			case 1: op = ICNEW, l = funcinst(f, IEXTUB, 'w', l, NULL); break;
 			case 2: op = ICNEW, l = funcinst(f, IEXTUH, 'w', l, NULL); break;
-			case 4: op = ICNEW; break;
+			/* w65816: a 4-byte integer (long, and a pointer, which is
+			 * converted through unsigned long above) is class 'l' here
+			 * (qbetype). Upstream's 'w' compare read its low 16 bits
+			 * only: `y && x` and `(bool)x` were false for x = 0x00010000,
+			 * and for a far pointer to offset $0000 of its bank.
+			 * (difftest, 2026-10-08) */
+			case 4: op = ICNEL; break;
 			case 8: op = ICNEL; break;
 			default:
 				fatal("internal error; unknown integer conversion");
@@ -372,8 +378,17 @@ convert(struct func *f, struct type *dst, struct type *src, struct value *l)
 		 * pointer-arithmetic path re-extended its RESULT (issue #132). */
 		class = qbetype(dst).base;
 		if (src->prop & PROPINT) {
-			if (dst->size <= src->size)
+			if (dst->size <= src->size) {
+				/* w65816: a 4-byte constant narrowed to 2 bytes or
+				 * fewer keeps only the bits of its new type —
+				 * `(s16)2141188073UL` reached a 'w' multiply and a
+				 * `jnz` with all 31 bits. A temp is returned as is
+				 * (its consumers read the low half; see funcjnz).
+				 * (difftest, 2026-10-08) */
+				if (l->kind == VALUE_INTCONST && src->size == 4 && dst->size <= 2)
+					return mkintconst(l->u.i & (dst->size == 2 ? 0xffff : 0xff));
 				return l;
+			}
 			switch (src->size) {
 			case 4: op = src->u.basic.issigned ? IEXTSW : IEXTUW; break;
 			case 2: op = src->u.basic.issigned ? IEXTSH : IEXTUH; break;
@@ -882,9 +897,18 @@ funcjnz(struct func *f, struct value *v, struct type *t, struct block *l1, struc
 		but QBE is not currently able to optimize the conversion
 		away for int.
 		*/
+		/* w65816: `jnz` tests a word — 16 bits here — whatever the
+		 * class of the temp it is given, as in upstream QBE. A 4-byte
+		 * condition (long, pointer) is therefore compared with zero
+		 * first (`cnel`), which the backend fuses back into the branch.
+		 * Until 2026-10-08 the fork handed jnz the 'l' temp and the
+		 * backend tested both halves of any 'l' temp: QBE, which knows
+		 * nothing of that rule, could put an 'l' temp where a 16-bit
+		 * condition stood (`(s16)x >> 0`, a narrowed long), and the
+		 * branch then read 32 bits. (difftest) */
 		if (t->prop & PROPINT && t->size < 4)
 			v = convert(f, &typeint, t, v);
-		else if (t->prop & PROPFLOAT || t->size > 4)
+		else if (t->prop & PROPFLOAT || t->size >= 4)
 			v = convert(f, &typebool, t, v);
 	}
 	b->jump.kind = JUMP_JNZ;

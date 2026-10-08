@@ -214,14 +214,23 @@ eval(struct expr *expr)
 				expr->u.binary.l = l->u.binary.l;
 			}
 			break;
+		/* The result of || and && is the int 0 or 1, not one of the
+		 * operands: returning `l` or `r` (sound only while both were
+		 * converted to bool first, which 7e83866 stopped doing) made
+		 * `(43732U || x)` the constant 43732 and `(1 && 7)` the
+		 * constant 7 — in an initialiser, an array size, an enum, a
+		 * case label, or any folded sub-expression.
+		 * (difftest, 2026-10-08) */
 		case TLOR:
-			if (l->kind != EXPRCONST)
-				break;
-			return l->u.constant.u ? l : r;
 		case TLAND:
 			if (l->kind != EXPRCONST)
 				break;
-			return l->u.constant.u ? r : l;
+			c = (l->type->prop & PROPFLOAT ? l->u.constant.f != 0 : l->u.constant.u != 0) == (expr->op == TLOR) ? l : r;
+			if (c->kind != EXPRCONST)
+				break;
+			expr->u.constant.u = c->type->prop & PROPFLOAT ? c->u.constant.f != 0 : c->u.constant.u != 0;
+			expr->kind = EXPRCONST;
+			break;
 		default:
 			if (l->kind != EXPRCONST || r->kind != EXPRCONST)
 				break;
