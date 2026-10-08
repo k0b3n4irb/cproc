@@ -1288,7 +1288,11 @@ condexpr(struct scope *s)
 
 	lt = l->type;
 	rt = r->type;
-	if (lt == rt) {
+	/* OpenSNES (2026-10-09): two operands of the same type keep it —
+	 * unless one is a bit-field, whose type for the conversion is its
+	 * promoted one (C11 6.3.1.1p2): `c ? bf.a : bf.b` with two
+	 * `unsigned int : 11` fields is an int, as `bf.a - bf.b` already was. */
+	if (lt == rt && l->kind != EXPRBITFIELD && r->kind != EXPRBITFIELD) {
 		t = lt;
 	} else if (lt->prop & PROPARITH && rt->prop & PROPARITH) {
 		t = commonreal(&l, &r);
@@ -1320,8 +1324,20 @@ condexpr(struct scope *s)
 		}
 	}
 	e = eval(e);
-	if (e->kind == EXPRCONST && e->type->prop & PROPINT)
-		return exprconvert(e->u.constant.u ? l : r, t);
+	if (e->kind == EXPRCONST && e->type->prop & PROPINT) {
+		/* OpenSNES (2026-10-09): the result has type t and is not a
+		 * bit-field. exprconvert() returns a bit-field operand as it is
+		 * when its declared type is already t, and the operator around
+		 * then promoted it again, as a bit-field, to int:
+		 * `b3 - (3 ? bf.b2 : (v2 * v3))`, common type unsigned, was
+		 * computed signed and sign-extended into a long (0xFFFFFF78 for
+		 * 0x0000FF78). With a condition the compiler cannot fold, the
+		 * EXPRCOND node already has type t. */
+		l = e->u.constant.u ? l : r;
+		if (l->kind == EXPRBITFIELD)
+			return mkexpr(EXPRCAST, t, l);
+		return exprconvert(l, t);
+	}
 	e = mkexpr(EXPRCOND, t, e);
 	e->u.cond.t = l;
 	e->u.cond.f = r;
