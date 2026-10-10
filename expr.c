@@ -447,9 +447,11 @@ hexval(int c)
 {
 	if ('0' <= c && c <= '9')
 		return c - '0';
-	if ('a' <= c && c <= 'z')
+	/* a to f only: this said a to z, so "\x7Fw" took the w for a digit
+	 * and came out as one wrong byte with the w gone (2026-10-11) */
+	if ('a' <= c && c <= 'f')
 		return c - 'a' + 10;
-	if ('A' <= c && c <= 'Z')
+	if ('A' <= c && c <= 'F')
 		return c - 'A' + 10;
 	return -1;
 }
