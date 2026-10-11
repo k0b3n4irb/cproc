@@ -149,7 +149,7 @@ mkunaryexpr(enum tokenkind op, struct expr *base)
 	case TMUL:
 		if (base->type->kind != TYPEPOINTER)
 			error(&tok.loc, "cannot dereference non-pointer");
-		if (base->kind == EXPRUNARY && base->op == TBAND) {
+		if (base->kind == EXPRUNARY && base->op == TBAND && base->base->kind != EXPRSTRING) {
 			type = base->type->base;
 			expr = base->base;
 			expr->type = type;
