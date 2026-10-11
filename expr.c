@@ -703,7 +703,12 @@ primaryexpr(struct scope *s)
 	case TSTRINGLIT:
 		e = mkexpr(EXPRSTRING, NULL, NULL);
 		t = stringconcat(&e->u.string, false);
-		e->type = mkarraytype(t, QUALNONE, e->u.string.size);
+		/* OpenSNES: a string literal is `const char[]` here, as in C++.
+		 * It is ROM data in a bank the linker picks, and only a read
+		 * through a const pointee is a far read: typed `char[]`, a
+		 * literal handed to a plain `char *` was read from the wrong
+		 * bank without a word, and `"abc"[i]` was read bank-blind. */
+		e->type = mkarraytype(t, QUALCONST, e->u.string.size);
 		e->lvalue = true;
 		e = decay(e);
 		break;
