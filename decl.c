@@ -718,6 +718,12 @@ declarator(struct scope *s, struct qualtype base, char **name, struct scope **fu
 						error(&tok.loc, "array length is too large");
 					t->size = base.type->size * e->u.constant.u;
 				} else {
+					/* No VLA on w65816: the backend gives every alloc a
+					 * fixed frame slot, so a run-time length used to
+					 * compile into a pointer to 2 bytes and the program
+					 * wrote over its own return address (audit 04-1).
+					 * The driver defines __STDC_NO_VLA__ to match. */
+					error(&tok.loc, "variable-length arrays are not supported on w65816: the array length must be an integer constant expression (a const variable is not one; use an enum or a #define)");
 					t->prop |= PROPVM;
 					t->u.array.length = e;
 					t->u.array.size = NULL;
