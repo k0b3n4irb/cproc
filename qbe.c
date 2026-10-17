@@ -662,8 +662,13 @@ funcbits(struct func *f, struct type *t, struct value *v, struct bitfield b)
 	return v;
 }
 
+/* OpenSNES (2026-10-17, audit 1.0 04-2): sflags / dflags are the access
+ * flags of funcload / funcstore (1 volatile, 2 const, 4 far) for the source
+ * and the destination. Without them `r = kl;`, kl a named static const
+ * struct in an asset bank, was copied with bank-$00 loads, while `r.k =
+ * kl.k` read the right bank; a volatile struct lost `volat` the same way. */
 static void
-funccopy(struct func *f, struct value *dst, struct value *src, unsigned long long size, int align)
+funccopy(struct func *f, struct value *dst, struct value *src, unsigned long long size, int align, int sflags, int dflags)
 {
 	enum instkind load, store;
 	int class;
@@ -686,8 +691,12 @@ funccopy(struct func *f, struct value *dst, struct value *src, unsigned long lon
 	inc = mkintconst(align);
 	off = 0;
 	for (;;) {
-		tmp = funcinst(f, load, class, src, NULL);
-		funcinst(f, store, 0, tmp, dst);
+		tmp = sflags ? funcinst_flags(f, load, class, src, NULL, sflags)
+		             : funcinst(f, load, class, src, NULL);
+		if (dflags)
+			funcinst_flags(f, store, 0, tmp, dst, dflags);
+		else
+			funcinst(f, store, 0, tmp, dst);
 		off += align;
 		if (off >= size)
 			break;
@@ -696,8 +705,17 @@ funccopy(struct func *f, struct value *dst, struct value *src, unsigned long lon
 	}
 }
 
+static int
+accessflags(enum typequal tq)
+{
+	return ((tq & QUALVOLATILE) ? 1 : 0) | ((tq & QUALCONST) ? 2 : 0)
+	     | ((tq & QUALFAR) ? 4 : 0);
+}
+
+/* stq: the qualifiers of the source object, read only by an aggregate
+ * copy (funccopy); a scalar store takes a value, not an object. */
 static struct value *
-funcstore(struct func *f, struct type *t, enum typequal tq, struct lvalue lval, struct value *v)
+funcstore(struct func *f, struct type *t, enum typequal tq, struct lvalue lval, struct value *v, enum typequal stq)
 {
 	struct value *r;
 	enum typeprop tp;
@@ -724,7 +742,8 @@ funcstore(struct func *f, struct type *t, enum typequal tq, struct lvalue lval, 
 	case TYPESTRUCT:
 	case TYPEUNION:
 	case TYPEARRAY:
-		funccopy(f, lval.addr, v, t->size, t->align);
+		funccopy(f, lval.addr, v, t->size, t->align, accessflags(stq),
+		         accessflags((tq | t->qual) & ~QUALCONST));
 		break;
 	case TYPEPOINTER:
 		t = &typeulong;
@@ -839,7 +858,7 @@ mkfunc(struct decl *decl, char *name, struct type *t, struct scope *s)
 			d->value = v;
 		} else {
 			funcalloc(f, d);
-			funcstore(f, d->type, QUALNONE, (struct lvalue){d->value}, v);
+			funcstore(f, d->type, QUALNONE, (struct lvalue){d->value}, v, QUALNONE);
 		}
 	}
 
@@ -1081,7 +1100,7 @@ funcexpr(struct func *f, struct expr *e)
 		 * incdec expression itself, which is empty. With it, `far++`
 		 * read bank $7E and wrote bank $00, and `reg++` on a volatile
 		 * stored without `volat`. */
-		v = funcstore(f, e->type, accessqual(e->base), lval, v);
+		v = funcstore(f, e->type, accessqual(e->base), lval, v, QUALNONE);
 		return e->u.incdec.post ? l : v;
 	case EXPRCALL:
 		/* OpenSNES (2026-10-03): see stmt.c, TRETURN — a callee declared
@@ -1322,7 +1341,8 @@ funcexpr(struct func *f, struct expr *e)
 			e->u.assign.l->u.temp = r;
 		} else {
 			lval = funclval(f, e->u.assign.l);
-			r = funcstore(f, e->u.assign.l->type, e->u.assign.l->qual, lval, r);
+			r = funcstore(f, e->u.assign.l->type, e->u.assign.l->qual, lval, r,
+			              accessqual(e->u.assign.r));
 		}
 		return r;
 	case EXPRCOMMA:
@@ -1423,7 +1443,7 @@ funcinit(struct func *func, struct decl *d, struct init *init, bool hasinit)
 				case 2: v = mkintconst(((uint_least16_t *)init->expr->u.string.data)[i]); break;
 				case 4: v = mkintconst(((uint_least32_t *)init->expr->u.string.data)[i]); break;
 				}
-				funcstore(func, init->expr->type->base, QUALNONE, dst, v);
+				funcstore(func, init->expr->type->base, QUALNONE, dst, v, QUALNONE);
 			}
 			offset = init->start + i * w;
 		} else {
@@ -1437,7 +1457,7 @@ funcinit(struct func *func, struct decl *d, struct init *init, bool hasinit)
 			if (init->start > 0)
 				dst.addr = funcinst(func, IADD, ptrclass, dst.addr, mkintconst(init->start));
 			src = funcexpr(func, init->expr);
-			funcstore(func, init->expr->type, QUALNONE, dst, src);
+			funcstore(func, init->expr->type, QUALNONE, dst, src, accessqual(init->expr));
 			offset = init->end;
 		}
 		if (max < offset)
