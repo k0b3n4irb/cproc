@@ -1181,6 +1181,49 @@ unaryexpr(struct scope *s)
 	return e;
 }
 
+/* OpenSNES (A10): the value of an integer constant expression built from
+ * constants, enumerators, integer casts and + - * | & ^ << >>, without
+ * touching the tree (eval() folds in place and may emit data). Overflow
+ * wraps; a negative result is a sentinel, not an address, and is never
+ * above $FFFF. */
+static bool
+constaddr(struct expr *e, long long *v)
+{
+	long long l, r;
+
+	switch (e->kind) {
+	case EXPRCONST:
+		if (!(e->type->prop & PROPINT))
+			return false;
+		*v = e->type->u.basic.issigned ? e->u.constant.i : (long long)e->u.constant.u;
+		return true;
+	case EXPRIDENT:
+		if (e->u.ident.decl->kind != DECLCONST)
+			return false;
+		*v = e->u.ident.decl->u.enumconst;
+		return true;
+	case EXPRCAST:
+		return e->type->prop & PROPINT && constaddr(e->base, v);
+	case EXPRBINARY:
+		if (!constaddr(e->u.binary.l, &l) || !constaddr(e->u.binary.r, &r))
+			return false;
+		switch (e->op) {
+		case TADD: *v = (long long)((unsigned long long)l + r); break;
+		case TSUB: *v = (long long)((unsigned long long)l - r); break;
+		case TMUL: *v = (long long)((unsigned long long)l * r); break;
+		case TBOR: *v = l | r; break;
+		case TBAND: *v = l & r; break;
+		case TXOR: *v = l ^ r; break;
+		case TSHL: if (l < 0 || r < 0 || r > 62) return false; *v = (long long)((unsigned long long)l << r); break;
+		case TSHR: if (r < 0 || r > 62) return false; *v = l >> r; break;
+		default: return false;
+		}
+		return true;
+	default:
+		return false;
+	}
+}
+
 static struct expr *
 castexpr(struct scope *s)
 {
@@ -1227,6 +1270,20 @@ done:
 	if (ct && ct != &typevoid && !(e->type->prop & PROPSCALAR))
 		error(&tok.loc, "cast operand must have scalar type");
 	*end = e;
+	/* OpenSNES (A10): an integer constant above $FFFF cast to a plain
+	 * pointer names a bank that only a deref at a constant offset keeps
+	 * (`p[5]` folds to `sta.l $708045`); `p[i]` reads and writes bank $00.
+	 * A `__far` or `const` pointee takes the bank from the pointer. */
+	for (e = r; e->kind == EXPRCAST; e = e->base) {
+		long long v;
+
+		if (e->type->kind != TYPEPOINTER || e->type->base->kind == TYPEFUNC)
+			continue;
+		if (e->type->qual & (QUALFAR | QUALCONST))
+			continue;
+		if (constaddr(e->base, &v) && v > 0xFFFF)
+			error(&tok.loc, "cast of address 0x%llX to a plain pointer loses its bank on an indexed access; point to a '__far' (FAR) or 'const' type", (unsigned long long)v);
+	}
 	return r;
 }
 
