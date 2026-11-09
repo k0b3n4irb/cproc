@@ -9,6 +9,27 @@ enum attrprefix {
 	PREFIXGNU,
 };
 
+/*
+GNU attributes this compiler does not implement and whose omission would
+change what the program means or where it is placed: skipping them, as is
+done for every other unknown attribute, would compile a different program
+without a word. They are refused, naming the attribute.
+*/
+static const struct {
+	char *name, *why;
+} refused[] = {
+	{"alias", "the declaration would not name the other object"},
+	{"cleanup", "the cleanup function would never be called"},
+	{"ext_vector_type", "it makes a vector type"},
+	{"mode", "it sets the width of the type"},
+	{"ms_struct", "it changes the layout of the structure"},
+	{"noinit", "it changes how the object is placed and initialized"},
+	{"persistent", "it changes how the object is placed and initialized"},
+	{"scalar_storage_order", "it changes the byte order of the members"},
+	{"section", "it changes where the object is placed"},
+	{"vector_size", "it makes a vector type"},
+};
+
 static char *
 strip(char *name)
 {
@@ -28,6 +49,7 @@ parseattr(struct attr *a, enum attrkind allowed, enum attrprefix prefix)
 	char *name, *prefixname = "";
 	enum attrkind kind;
 	int paren;
+	size_t i;
 
 	if (tok.kind != TIDENT)
 		return false;
@@ -70,6 +92,11 @@ parseattr(struct attr *a, enum attrkind allowed, enum attrprefix prefix)
 			kind = ATTRDESTRUCTOR;
 		} else if (strcmp(name, "packed") == 0) {
 			kind = ATTRPACKED;
+		} else {
+			for (i = 0; i < LEN(refused); ++i) {
+				if (strcmp(name, refused[i].name) == 0)
+					error(&tok.loc, "GNU attribute '%s' is not supported: %s", name, refused[i].why);
+			}
 		}
 		break;
 	}
